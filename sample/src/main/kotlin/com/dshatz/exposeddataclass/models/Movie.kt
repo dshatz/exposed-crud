@@ -1,12 +1,6 @@
 package com.dshatz.exposeddataclass.models
 
-import com.dshatz.exposeddataclass.DefaultText
-import com.dshatz.exposeddataclass.Entity
-import com.dshatz.exposeddataclass.Id
-import com.dshatz.exposeddataclass.References
-import org.jetbrains.exposed.dao.LongEntity
-import org.jetbrains.exposed.dao.LongEntityClass
-import org.jetbrains.exposed.dao.id.EntityID
+import com.dshatz.exposeddataclass.*
 
 @Entity
 data class Movie(
@@ -18,6 +12,10 @@ data class Movie(
 
     val originalTitle: String?,
 
-    @References(Director::class)
-    val directorId: Long
+    @ForeignKey(Director::class)
+    val directorId: Long,
+
+    @References(Director::class, "directorId")
+    val director: Director? = null
+
 )

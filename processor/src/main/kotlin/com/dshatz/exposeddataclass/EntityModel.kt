@@ -14,7 +14,8 @@ data class EntityModel(
     val originalClassName: ClassName,
     val tableName: String,
     val columns: List<ColumnModel>,
-    val primaryKey: PrimaryKey
+    val primaryKey: PrimaryKey,
+    val references: Map<ColumnModel, ReferenceInfo>
 ) {
 
     val tableClass by lazy {
@@ -110,7 +111,7 @@ data class ColumnModel(
     val type: TypeName,
     val autoIncrementing: Boolean,
     val default: CodeBlock?,
-    val foreignKey: ReferenceInfo?
+    val foreignKey: FKInfo?
 )
 
 sealed class PrimaryKey: Iterable<ColumnModel> {
@@ -124,10 +125,6 @@ sealed class PrimaryKey: Iterable<ColumnModel> {
 }
 
 
-data class ReferenceInfo(val related: TypeName)
+data class FKInfo(val related: TypeName)
 
-sealed class PropType {
-    data object String: PropType()
-    data object Long: PropType()
-    data object Int: PropType()
-}
+data class ReferenceInfo(val related: TypeName, val localIdProps: Array<String>)

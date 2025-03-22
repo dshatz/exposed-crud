@@ -170,6 +170,10 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
                 convertingCode.addStatement("%N = row[%N],", it.nameInEntity, it.nameInDsl)
             }
         }
+        val member = MemberName("com.dshatz.exposeddataclass.typed", "parseReferencedEntity")
+        references.forEach { (column, refInfo) ->
+            convertingCode.addStatement("%N = %M(row, %T)", column.nameInEntity, member, models[refInfo.related]!!.tableClass)
+        }
         val fromRow = FunSpec.builder("toEntity")
             .addModifiers(KModifier.OVERRIDE)
             .returns(originalClassName)

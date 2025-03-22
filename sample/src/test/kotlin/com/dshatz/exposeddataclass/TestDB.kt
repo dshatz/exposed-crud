@@ -1,6 +1,7 @@
 package com.dshatz.exposeddataclass
 
 import com.dshatz.exposeddataclass.models.*
+import com.dshatz.exposeddataclass.models.CategoryTable.toEntityList
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -106,6 +107,16 @@ class TestDB {
         MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId))
         val movie = MovieTable.repo.select().where(MovieTable.directorId eq directorId).first()
         assertEquals("The Birds", movie.title)
+    }
+
+    @Test
+    fun `foreign key with ref`(): Unit = transaction {
+        val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
+        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId))
+
+        val movieWithDirector = MovieTable.repo.withRelated(DirectorTable).selectAll().first()
+        assertEquals("Alfred", movieWithDirector.director?.name)
+        assertEquals("The Birds", movieWithDirector.title)
     }
 
 

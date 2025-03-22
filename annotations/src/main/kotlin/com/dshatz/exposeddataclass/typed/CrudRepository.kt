@@ -5,14 +5,26 @@ import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.InsertStatement
 
-class CrudRepository<T, ID : Any, E, N>(private val table: T) where T: IdTable<ID>, T: IEntityTable<E, N, ID>{
+data class CrudRepository<T, ID : Any, E, N>(private val table: T, private val related: List<ColumnSet> = emptyList()) where T: IdTable<ID>, T: IEntityTable<E, N, ID>{
+
+    private fun selectWithJoins(): Query {
+        return if (related.isEmpty()) {
+            table.selectAll()
+        } else {
+            var source = table.leftJoin(related.first())
+            related.drop(1).forEach {
+                source = source.leftJoin(it)
+            }
+            source.selectAll()
+        }
+    }
 
     fun selectAllLazy(): SizedIterable<E> {
-        return table.selectAll().mapLazy { table.toEntity(it) }
+        return selectWithJoins().mapLazy { table.toEntity(it) }
     }
 
     fun selectAll(): List<E> {
-        return table.selectAll().map { table.toEntity(it) }
+        return selectWithJoins().map { table.toEntity(it) }
     }
 
     fun create(data: N): InsertStatement<Number> {
@@ -50,12 +62,14 @@ class CrudRepository<T, ID : Any, E, N>(private val table: T) where T: IdTable<I
     }
 
     fun select(): TypedSelect<T, E, ID> {
-        return TypedSelect(table, table.select(table.columns))
+        return TypedSelect(table, selectWithJoins())
     }
+
+    fun withRelated(table: ColumnSet) = copy(related = related + table)
 
     fun findById(id: ID): E? {
         val eid = EntityID(id, table)
-        return table.select(table.columns).where({
+        return selectWithJoins().where({
             table.id eq eid
         }).limit(1).firstOrNull()?.let(table::toEntity)
     }

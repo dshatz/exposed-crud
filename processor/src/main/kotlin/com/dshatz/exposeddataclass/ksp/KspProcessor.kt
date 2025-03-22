@@ -3,7 +3,6 @@ package com.dshatz.exposeddataclass.ksp
 import com.dshatz.exposeddataclass.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
-import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
 import com.squareup.kotlinpoet.STRING
 import com.squareup.kotlinpoet.ksp.toClassName
@@ -55,7 +54,9 @@ class KspProcessor(
         val props = entityClass.getAllProperties()
         val idProps = entityClass.findPropsWithAnnotation(Id::class)
 
-        val columns = props.associateWith { declaration ->
+        val referenceProps = props.filter { it.getAnnotation(References::class) != null }
+
+        fun computeProp(declaration: KSPropertyDeclaration): ColumnModel {
             val name = declaration.getPropName()
             val type = declaration.type.toTypeName()
             val columnAnnotation = declaration.getAnnotation(Column::class)
@@ -67,13 +68,13 @@ class KspProcessor(
             }
             val columnName = columnAnnotation?.getArgumentAs<String>() ?: name.decapitate()
 
-            val references = declaration.getAnnotation(References::class)?.getArgumentAs<KSType>()?.let {
-                ReferenceInfo(it.toTypeName())
+            val foreignKey = declaration.getAnnotation(ForeignKey::class)?.getArgumentAs<KSType>()?.let {
+                FKInfo(it.toTypeName())
             }
 
             val autoIncrement = declaration.getAnnotation(Id::class)?.getArgumentAs<Boolean>() == true
 
-            ColumnModel(
+            return ColumnModel(
                 declaration = declaration,
                 nameInEntity = name,
                 columnName = columnName,
@@ -81,8 +82,21 @@ class KspProcessor(
                 type = declaration.type.toTypeName(),
                 autoIncrementing = autoIncrement,
                 default = default,
-                foreignKey = references
+                foreignKey = foreignKey
             )
+        }
+
+        val columns = (props - referenceProps).associateWith { declaration ->
+            computeProp(declaration)
+        }
+
+        val refColumns = referenceProps.associate { declaration ->
+            val prop = computeProp(declaration)
+            val ref = ReferenceInfo(
+                related = declaration.getAnnotation(References::class)?.getArgumentAs<KSType>(0)?.toTypeName()!!,
+                localIdProps = declaration.getAnnotation(References::class)?.getArgumentAs<List<String>>(1)!!.toTypedArray()
+            )
+            prop to ref
         }
 
         val primaryKey = if (idProps.size == 1) {
@@ -98,7 +112,8 @@ class KspProcessor(
             originalClassName = entityClass.toClassName(),
             tableName = tableName,
             columns = columns.values.toList(),
-            primaryKey = primaryKey
+            primaryKey = primaryKey,
+            references = refColumns
         )
     }
 }
