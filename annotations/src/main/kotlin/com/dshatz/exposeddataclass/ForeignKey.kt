@@ -3,4 +3,4 @@ package com.dshatz.exposeddataclass
 import kotlin.reflect.KClass
 
 @Target(AnnotationTarget.PROPERTY)
-annotation class ForeignKey(val related: KClass<*>)
+annotation class ForeignKey(val related: KClass<*>, val onlyColumn: String = "")

@@ -18,6 +18,10 @@ data class EntityModel(
     val references: Map<ColumnModel, ReferenceInfo>
 ) {
 
+    override fun toString(): String {
+        return "[${declaration.simpleName.asString()}] (${columns.joinToString { it.nameInDsl }})"
+    }
+
     val tableClass by lazy {
         ClassName(originalClassName.packageName, originalClassName.simpleName + "Table")
     }
@@ -112,7 +116,11 @@ data class ColumnModel(
     val autoIncrementing: Boolean,
     val default: CodeBlock?,
     val foreignKey: FKInfo?
-)
+) {
+    override fun toString(): String {
+        return "$nameInDsl: $type"
+    }
+}
 
 sealed class PrimaryKey: Iterable<ColumnModel> {
     data class Simple(val prop: ColumnModel): PrimaryKey() {
@@ -125,6 +133,6 @@ sealed class PrimaryKey: Iterable<ColumnModel> {
 }
 
 
-data class FKInfo(val related: TypeName)
+data class FKInfo(val related: TypeName, val onlyColumn: String? = null)
 
 data class ReferenceInfo(val related: TypeName, val localIdProps: Array<String>)

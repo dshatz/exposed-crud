@@ -15,7 +15,13 @@ data class Movie(
     @ForeignKey(Director::class)
     val directorId: Long,
 
-    @References(Director::class, "directorId")
-    val director: Director? = null
+    @ForeignKey(Category::class)
+    val categoryId: Long,
+
+    @References(Director::class)
+    val director: Director? = null,
+
+    @References(Category::class)
+    val category: Category? = null
 
 )

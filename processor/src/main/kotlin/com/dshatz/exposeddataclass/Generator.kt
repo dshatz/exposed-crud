@@ -17,9 +17,12 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
     private val newModelMapping: MutableMap<EntityModel, ClassName> = mutableMapOf()
     private val typedQueriesGenerator: TypedQueriesGenerator? = TypedQueriesGenerator(newModelMapping)
 
-    fun generate(): List<FileSpec> {
+    private val finalColumnTypes: MutableMap<Pair<EntityModel, ColumnModel>, TypeName> = mutableMapOf()
+
+    fun generate(): Map<EntityModel, FileSpec> {
         // https://www.jetbrains.com/help/exposed/getting-started-with-exposed.html#define-table-object
-        return models.values.map { tableModel ->
+        models.values.forEach { calculateColumnTypes(it) }
+        return models.values.associateWith { tableModel ->
             val fileSpec = FileSpec.builder(tableModel.tableClass)
 
             val newModel = if (tableModel.columns.any { it.autoIncrementing } && tableModel.columns.any { !it.autoIncrementing })
@@ -28,6 +31,9 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
 
             val newModelClass = newModelMapping[tableModel] ?: tableModel.originalClassName
 
+
+            validateForeignKeyAnnotations(tableModel)
+            validateReferenceAnnotations(tableModel)
             // object Tasks : <Int>IdTable("tasks") {
             val tableDef = TypeSpec.objectBuilder(tableModel.tableClass)
                 .addSuperinterface(IEntityTable::class.asTypeName().parameterizedBy(tableModel.originalClassName, newModelClass, tableModel.idType()))
@@ -46,6 +52,7 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
                 tableDef.addProperty(it.generateProp(tableModel))
             }
 
+
             primaryKey?.build()?.let(tableDef::addProperty)
             tableDef.addFunction(tableModel.generateToEntityConverter())
             tableDef.addFunction(generateUpdateApplicator(tableModel, true))
@@ -53,14 +60,14 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
             tableDef.addFunction(generatePKMaker(tableModel))
             tableDef.addTableSuperclass(tableModel)
 
-            if (tableModel.primaryKey is PrimaryKey.Composite) tableDef.addInitializerBlock(
+            /*if (tableModel.primaryKey is PrimaryKey.Composite) tableDef.addInitializerBlock(
                 CodeBlock.builder()
                     .apply {
                         tableModel.primaryKey.forEach {
                             addStatement("addIdColumn(%N)", it.nameInDsl)
                         }
                     }.build()
-            )
+            )*/
 
 
             fileSpec
@@ -74,47 +81,87 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
         }
     }
 
-    private fun generateEntity(model: EntityModel): TypeSpec {
-        val originalClassName = model.originalClassName
-        val entityClassName = ClassName(model.tableClass.packageName, originalClassName.simpleName + "Entity")
-        val spec = TypeSpec.classBuilder(entityClassName)
-        model.entitySuperclass().let { (superclass, init) ->
-            spec.superclass(superclass)
-            spec.addSuperclassConstructorParameter(init)
-        }
-        model.entityCompanionObjectSuperclass(entityClassName, model.tableClass).let { (superclass, init) ->
-            spec.addType(
-                TypeSpec.companionObjectBuilder()
-                    .superclass(superclass)
-                    .addSuperclassConstructorParameter(init)
-                    .build()
-            )
-        }
-        model.entityIdType().let { parameterType ->
-            spec.primaryConstructor(
-                FunSpec
-                    .constructorBuilder()
-                    .addParameter("id", parameterType)
-                    .build()
-            )
-        }
+    private fun calculateColumnTypes(tableModel: EntityModel) {
+        tableModel.columns.forEach {
+            it.apply {
+                val colType = if (foreignKey != null) {
+                    // Foreign key
+                    val relatedModel = models[foreignKey.related]
+                    val remotePK = relatedModel?.primaryKey
+                    when (remotePK) {
+                        is PrimaryKey.Simple -> {
+                            models[foreignKey.related]!!.entityIdType()
+                        }
+                        is PrimaryKey.Composite -> {
+                            val remoteColumn = foreignKey.onlyColumn ?: throw ProcessorException("@ForeignKey to a table with composite FK must specify remote column name", declaration)
+                            relatedModel.columns.find { it.nameInDsl == remoteColumn }!!.type
+                        }
+                        else -> {
+                            type
+                        }
+                    }
 
-        (model.columns - model.primaryKey).forEach {
-            val prop = if (it.foreignKey != null) {
-                val relatedModel = models[it.foreignKey.related]!!
-                PropertySpec.builder(it.nameInEntity, relatedModel.entityClass)
-                    .mutable(true)
-                    .delegate(CodeBlock.of("%T.referencedOn(%T.id)", relatedModel.entityClass, relatedModel.tableClass))
-                    .build()
-            } else {
-                PropertySpec.builder(it.nameInEntity, it.type)
-                    .mutable(true)
-                    .delegate("%T.%N", model.tableClass, it.nameInDsl)
-                    .build()
+                } else {
+                    // Not a FK
+                    if (this in tableModel.primaryKey) {
+                        // column part of PK
+                        if (tableModel.primaryKey is PrimaryKey.Simple) {
+                            // Column is the sole PK.
+                            tableModel.entityIdType()
+                        } else {
+                            // Column is part of a composite PK.
+                            EntityID::class.asTypeName().parameterizedBy(type)
+                        }
+                    } else type
+                }
+                finalColumnTypes[tableModel to this] = colType
             }
-            spec.addProperty(prop)
         }
-        return spec.build()
+    }
+
+    private fun validateForeignKeyAnnotations(model: EntityModel) {
+        model.columns.forEach { col ->
+            if (col.foreignKey != null) {
+                val remoteModel = models[col.foreignKey.related]
+                    ?: throw ProcessorException("Unknown foreign key target ${col.foreignKey.related} - is it annotated with @Entity?", col.declaration)
+                if (col.foreignKey.onlyColumn != null) {
+                    // Custom column specified
+                    val remoteColumn = remoteModel.columns.find { it.nameInDsl == col.foreignKey.onlyColumn }
+                    if (remoteColumn == null) {
+                        throw ProcessorException("Column ${col.foreignKey.onlyColumn} not found in ${remoteModel.originalClassName.simpleName}", col.declaration)
+                    } else {
+                        if (remoteColumn.type != col.type) throw ProcessorException("Column ${remoteModel.originalClassName.simpleName}.${remoteColumn.nameInDsl} is of type ${remoteColumn.type}, but @ForeignKey annotated prop is ${col.type}", col.declaration)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun validateReferenceAnnotations(model: EntityModel) {
+        model.references.entries.forEach { (column, refInfo) ->
+            val remoteModel = models[refInfo.related] ?: throw ProcessorException("Unknown reference ${refInfo.related} - is it annotated with @Entity?", column.declaration)
+            val remotePK = remoteModel.primaryKey
+            if (refInfo.localIdProps.isNotEmpty()) {
+                if (refInfo.localIdProps.size != remotePK.count()) {
+                    throw ProcessorException("Expected ${remotePK.count()} column names in 'fkColumns' of @References. You can also not specify any in order to auto-detect them.", column.declaration)
+                }
+                refInfo.localIdProps.forEach { localIdProp ->
+                    if (model.columns.find {
+                        it.foreignKey?.related == refInfo.related && it.nameInDsl == localIdProp
+                    } == null) {
+                        throw ProcessorException("$localIdProp not found in ${model.tableName}. It should be annotated with @ForeignKey(${refInfo.related}::class)", model.declaration)
+                    }
+                }
+            } else {
+                // Auto detect foreign keys.
+                remotePK.forEach { remoteIDColumn ->
+                    val localName = remoteModel.originalClassName.simpleName.decapitate() + remoteIDColumn.nameInDsl.capitalize()
+                    if (model.columns.find { it.foreignKey?.related == refInfo.related && it.nameInDsl == localName } == null) {
+                        throw ProcessorException("$localName not found in ${model.tableName}. It should be annotated with @ForeignKey(${refInfo.related}::class). If $localName is not correct, specify the correct name in @References", model.declaration)
+                    }
+                }
+            }
+        }
     }
 
     private fun generateUpdateApplicator(model: EntityModel, excludeAutoIncrement: Boolean): FunSpec {
@@ -172,47 +219,67 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
         }
         val member = MemberName("com.dshatz.exposeddataclass.typed", "parseReferencedEntity")
         references.forEach { (column, refInfo) ->
-            convertingCode.addStatement("%N = %M(row, %T)", column.nameInEntity, member, models[refInfo.related]!!.tableClass)
+            convertingCode.addStatement("%N = %M(row, %T),", column.nameInEntity, member, models[refInfo.related]!!.tableClass)
         }
-        val fromRow = FunSpec.builder("toEntity")
+        val toEntity = FunSpec.builder("toEntity")
             .addModifiers(KModifier.OVERRIDE)
             .returns(originalClassName)
             .addParameter("row", ResultRow::class)
             .addStatement("return %T(\n%L)", originalClassName, convertingCode.build())
             .build()
-        return fromRow
+        return toEntity
     }
 
     private fun ColumnModel.generateProp(tableModel: EntityModel): PropertySpec {
         val isSimpleId = tableModel.primaryKey is PrimaryKey.Simple && this in tableModel.primaryKey
 
-        val colType = if (foreignKey != null) {
-            models[foreignKey.related]!!.entityIdType()
-        } else if (isSimpleId) {
-            tableModel.entityIdType()
-        } else type
-
-        val propType = Column::class.asTypeName().parameterizedBy(colType)
-
-
-        val spec = PropertySpec.builder(nameInDsl, propType)
-        if (isSimpleId) spec.addModifiers(KModifier.OVERRIDE)
         val initializer = CodeBlock.builder()
-        if (this.foreignKey != null) {
+        val colType = if (foreignKey != null) {
+            // Foreign key
             val relatedModel = models[foreignKey.related]
             val remotePK = relatedModel?.primaryKey
             when (remotePK) {
-                is PrimaryKey.Composite -> TODO()
-                is PrimaryKey.Simple -> initializer.add("reference(%S, %T)", columnName, relatedModel.tableClass)
-                null -> throw ProcessorException("Could not find primary key on referenced entity ${foreignKey.related}", this.declaration)
+                is PrimaryKey.Simple -> {
+                    initializer.add("reference(%S, %T)", columnName, relatedModel.tableClass)
+                    models[foreignKey.related]!!.entityIdType()
+                }
+                is PrimaryKey.Composite -> {
+                    val remoteColumn = foreignKey.onlyColumn ?: throw ProcessorException("@ForeignKey to a table with composite FK must specify remote column name", declaration)
+                    initializer.add("reference(%S, %T.%N)", columnName, relatedModel.tableClass, remoteColumn)
+                    val remoteCol = relatedModel.columns.find { it.nameInDsl == remoteColumn }!!
+                    finalColumnTypes[relatedModel to remoteCol]
+                        ?: throw ProcessorException("Could not get column type for ${relatedModel.originalClassName.simpleName}.${remoteCol.nameInDsl}\n$finalColumnTypes", declaration)
+                }
+                else -> {
+                    type
+                }
+            }.also {
+                if (this in tableModel.primaryKey) initializer.add(".also(::addIdColumn)")
             }
+
         } else {
+            // Not a FK
             initializer.add("%L(%S)", exposedTypeFun(), columnName)
             if (autoIncrementing) initializer.add(".autoIncrement()")
             default?.let { initializer.add(".default(%L)", it) }
             if (type.isNullable) initializer.add(".nullable()")
-            if (this in tableModel.primaryKey) initializer.add(".entityId()")
+            if (this in tableModel.primaryKey) {
+                // column part of PK
+                initializer.add(".entityId()")
+                if (tableModel.primaryKey is PrimaryKey.Simple) {
+                    // Column is the sole PK.
+                    tableModel.entityIdType()
+                } else {
+                    // Column is part of a composite PK.
+                    EntityID::class.asTypeName().parameterizedBy(type)
+                }
+            } else type
         }
+
+        val propType = Column::class.asTypeName().parameterizedBy(colType)
+
+        val spec = PropertySpec.builder(nameInDsl, propType)
+        if (isSimpleId) spec.addModifiers(KModifier.OVERRIDE)
 
         return spec.initializer(initializer.build()).build()
     }

@@ -7,9 +7,7 @@ import com.dshatz.exposeddataclass.ForeignKey
 @Entity
 data class CategoryTranslations(
     @Id
-    @ForeignKey(Category::class)
-    val categoryId: Long,
-
+    val msgId: Long,
     @Id
     @ForeignKey(Language::class)
     val languageCode: String,

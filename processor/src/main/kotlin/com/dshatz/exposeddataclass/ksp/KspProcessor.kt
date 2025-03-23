@@ -24,14 +24,16 @@ class KspProcessor(
                 it.toClassName() to processEntity(it)
             }
 
+            validate(models.values)
+
             models.forEach {
                 logger.warn(it.toString())
             }
 
             val generator = Generator(models)
             val files = generator.generate()
-            files.forEach {
-                it.writeTo(codeGenerator, Dependencies(true))
+            files.forEach { (model, file) ->
+                file.writeTo(codeGenerator, true, listOf(model.declaration.containingFile!!))
             }
             return emptyList()
         } catch (e: ProcessorException) {
@@ -68,8 +70,10 @@ class KspProcessor(
             }
             val columnName = columnAnnotation?.getArgumentAs<String>() ?: name.decapitate()
 
-            val foreignKey = declaration.getAnnotation(ForeignKey::class)?.getArgumentAs<KSType>()?.let {
-                FKInfo(it.toTypeName())
+            val foreignKey = declaration.getAnnotation(ForeignKey::class)?.let {
+                val remoteType = it.getArgumentAs<KSType>()?.toTypeName()!!
+                val remoteColumn = it.getArgumentAs<String>(1)?.takeUnless { it.isEmpty() }
+                FKInfo(remoteType, remoteColumn)
             }
 
             val autoIncrement = declaration.getAnnotation(Id::class)?.getArgumentAs<Boolean>() == true
@@ -115,5 +119,13 @@ class KspProcessor(
             primaryKey = primaryKey,
             references = refColumns
         )
+    }
+
+    private fun validate(models: Iterable<EntityModel>) {
+        models.forEach { table ->
+            if (table.primaryKey is PrimaryKey.Composite && table.columns.any { it.autoIncrementing && it in table.primaryKey}) {
+                logger.error("auto-increment on a composite key now allowed", table.declaration)
+            }
+        }
     }
 }

@@ -90,21 +90,24 @@ class TestDB {
 
     @Test
     fun `composite ids`(): Unit = transaction {
+        val msgId = 0L
+        val lang = "lv"
         LanguageTable.repo.create(Language("lv"))
-        CategoryTable.repo.create(Category(0))
+        CategoryTable.repo.create(Category_Data(msgId))
         CategoryTranslationsTable.repo.create(
             CategoryTranslations(
-            0, "lv", "Latviski"
+                msgId, lang, "Latviski"
+            )
         )
-        )
-        val found = CategoryTranslationsTable.repo.findById(0, "lv")
+        val found = CategoryTranslationsTable.repo.findById(msgId, lang)
         assertEquals("Latviski", found?.translation)
     }
 
     @Test
     fun `foreign key`(): Unit = transaction {
         val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId))
+        val categoryId = CategoryTable.repo.createReturning(Category_Data(0)).id
+        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, categoryId))
         val movie = MovieTable.repo.select().where(MovieTable.directorId eq directorId).first()
         assertEquals("The Birds", movie.title)
     }
@@ -112,7 +115,8 @@ class TestDB {
     @Test
     fun `foreign key with ref`(): Unit = transaction {
         val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId))
+        val categoryId = CategoryTable.repo.createReturning(Category_Data(0)).id
+        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, categoryId))
 
         val movieWithDirector = MovieTable.repo.withRelated(DirectorTable).selectAll().first()
         assertEquals("Alfred", movieWithDirector.director?.name)
