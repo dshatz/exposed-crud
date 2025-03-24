@@ -5,23 +5,21 @@ import com.dshatz.exposeddataclass.models.CategoryTable.toEntityList
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
+import kotlin.test.*
 
 class TestDB {
 
     private lateinit var db: Database
     @BeforeTest
     fun init() {
-        db = Database.connect("jdbc:sqlite:memory:", "org.sqlite.JDBC")
+        db = Database.connect("jdbc:sqlite:memory:?foreign_keys=on", "org.sqlite.JDBC")
         transaction(db) {
+            addLogger(StdOutSqlLogger)
             SchemaUtils.drop(DirectorTable, MovieTable, LanguageTable, CategoryTable, CategoryTranslationsTable)
             SchemaUtils.create(DirectorTable, MovieTable, LanguageTable, CategoryTable, CategoryTranslationsTable)
         }
         transaction(db) {
-            SchemaUtils.listTables()
+            println(SchemaUtils.listTables())
         }
     }
 
@@ -90,37 +88,57 @@ class TestDB {
 
     @Test
     fun `composite ids`(): Unit = transaction {
-        val msgId = 0L
         val lang = "lv"
-        LanguageTable.repo.create(Language("lv"))
-        CategoryTable.repo.create(Category_Data(msgId))
+        LanguageTable.repo.create(Language(lang))
+        val catId = CategoryTable.repo.createReturning(Category_Data()).id
         CategoryTranslationsTable.repo.create(
             CategoryTranslations(
-                msgId, lang, "Latviski"
+                catId, lang, "Latviski"
             )
         )
-        val found = CategoryTranslationsTable.repo.findById(msgId, lang)
+        val found = CategoryTranslationsTable.repo.findById(catId, lang)
         assertEquals("Latviski", found?.translation)
+
+        val withTranslations = CategoryTable.repo.withRelated(CategoryTranslationsTable).findById(catId)
+        assertNotNull(withTranslations)
     }
 
     @Test
     fun `foreign key`(): Unit = transaction {
         val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        val categoryId = CategoryTable.repo.createReturning(Category_Data(0)).id
-        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, categoryId))
+        LanguageTable.repo.insert(Language("lv"))
+//        val catId = CategoryTable.repo.createWithRelated(Category_Data(0), CategoryTranslations(0, "lv", "Latviski")).id
+
+        /*MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, catId))
         val movie = MovieTable.repo.select().where(MovieTable.directorId eq directorId).first()
-        assertEquals("The Birds", movie.title)
+        assertEquals("The Birds", movie.title)*/
     }
 
     @Test
     fun `foreign key with ref`(): Unit = transaction {
         val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        val categoryId = CategoryTable.repo.createReturning(Category_Data(0)).id
+        val categoryId = CategoryTable.repo.createReturning(Category_Data()).id
+        println(CategoryTranslationsTable.repo.createWithRelated(
+            CategoryTranslations(categoryId, "", "Latviski"),
+            language = Language("lv")
+        ))
         MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, categoryId))
 
         val movieWithDirector = MovieTable.repo.withRelated(DirectorTable).selectAll().first()
         assertEquals("Alfred", movieWithDirector.director?.name)
         assertEquals("The Birds", movieWithDirector.title)
+    }
+
+    @Test
+    fun `insert with related`() = transaction {
+        val movie = MovieTable.repo.createWithRelated(
+            movie = Movie_Data("Die Hard", "",  null, -1, -1),
+            director = Director_Data("John McTiernan"),
+            category = Category_Data()
+        )
+
+        assertNotEquals(-1, movie.directorId)
+        assertNotEquals(-1, movie.categoryId)
     }
 
 

@@ -19,7 +19,9 @@ data class EntityModel(
 ) {
 
     override fun toString(): String {
-        return "[${declaration.simpleName.asString()}] (${columns.joinToString { it.nameInDsl }})"
+        return "[${declaration.simpleName.asString()}] (${columns.joinToString { 
+            it.nameInDsl + (it.default?.let { " = " + it.toString() } ?: "")
+        }})"
     }
 
     val tableClass by lazy {

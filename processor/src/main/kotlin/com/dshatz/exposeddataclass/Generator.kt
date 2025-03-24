@@ -10,6 +10,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.statements.UpdateBuilder
+import javax.swing.table.TableModel
 import kotlin.uuid.ExperimentalUuidApi
 
 class Generator(private val models: Map<ClassName, EntityModel>) {
@@ -77,6 +78,11 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
                     typedQueriesGenerator?.generateTypesQueries(tableModel)?.let { addProperty(it) }
                 }
                 .addFunction(generateFindById(tableModel))
+                .apply {
+                    if (tableModel.references.isNotEmpty() || tableModel.columns.any { it.foreignKey != null }) {
+                        addFunction(generateInsertWithRelated(tableModel))
+                    }
+                }
                 .build()
         }
     }
@@ -316,6 +322,15 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
         return spec.addCode("return %L", code.build()).build()
     }*/
 
+    private fun EntityModel.crudRepositoryType(): ParameterizedTypeName {
+        return CrudRepository::class.asTypeName().parameterizedBy(
+            tableClass,
+            idType(),
+            originalClassName,
+            newModelMapping[this] ?: originalClassName
+        )
+    }
+
     private fun generateFindById(model: EntityModel): FunSpec {
         val idCode = when (model.primaryKey) {
             is PrimaryKey.Composite -> {
@@ -336,17 +351,66 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
             }
         }
         return FunSpec.builder("findById")
-            .receiver(CrudRepository::class.asTypeName().parameterizedBy(
-                model.tableClass,
-                model.idType(),
-                model.originalClassName,
-                newModelMapping[model] ?: model.originalClassName
-            ))
+            .receiver(model.crudRepositoryType())
             .returns(model.originalClassName.copy(nullable = true))
             .addParameters(model.primaryKey.map {
                 ParameterSpec(it.nameInEntity, it.type)
             })
             .addCode("return findOne({%T.id.eq(EntityID(%L, %T))})", model.tableClass, idCode, model.tableClass)
+            .build()
+    }
+
+    private fun generateInsertWithRelated(model: EntityModel): FunSpec {
+        val related = model.references.values
+
+        val foreignKeys = model.columns.filter { it.foreignKey != null }
+
+        val modelParamName = model.originalClassName.simpleName.decapitate()
+
+        data class RelatedInfo(
+            val relatedModel: EntityModel,
+            val param: ParameterSpec,
+            val relatedField: ColumnModel,
+            val localColumn: ColumnModel
+        )
+
+        val params = foreignKeys.map { it ->
+            val fk = it.foreignKey!!
+            val relatedModel = models[fk.related]!!
+            val paramName = relatedModel.originalClassName.simpleName.decapitate()
+            val type = newModelMapping[relatedModel] ?: relatedModel.originalClassName
+            val onRemoteCol = relatedModel.columns.find { it.nameInDsl == fk.onlyColumn } ?: relatedModel.primaryKey.single()
+            RelatedInfo(
+                relatedModel,
+                ParameterSpec.builder(paramName, type.copy(nullable = true))
+                    .defaultValue("null").build(),
+                onRemoteCol,
+                it
+            )
+        }
+
+        val insertCode = CodeBlock.builder().beginControlFlow("return %M", MemberName("org.jetbrains.exposed.sql.transactions", "transaction"))
+        params.forEach { (relatedModel, param, remoteColumn, localColumn) ->
+            val valRelatedId = param.name + remoteColumn.nameInDsl.capitalize()
+            insertCode.addStatement("val %N = %N?.let { %T.repo.createReturning(%L).%N }", valRelatedId, param.name, relatedModel.tableClass, param.name, remoteColumn.nameInEntity)
+            insertCode.addStatement("//$remoteColumn")
+        }
+        val copyCode = CodeBlock.builder().add("%N.copy(\n", modelParamName)
+        params.forEach { (relatedModel, param, remoteColumn, localColumn) ->
+            val withId = param.name + remoteColumn.nameInDsl.capitalize()
+            copyCode.add("%N = %N ?: %N.%N,\n", localColumn.nameInDsl, withId, modelParamName, localColumn.nameInDsl)
+        }
+        copyCode.add(")")
+
+        insertCode.addStatement("%T.repo.createReturning(%L)", model.tableClass, copyCode.build())
+        insertCode.endControlFlow()
+
+        return FunSpec.builder("createWithRelated")
+            .receiver(model.crudRepositoryType())
+            .addParameter(ParameterSpec(modelParamName, newModelMapping[model] ?: model.originalClassName))
+            .returns(model.originalClassName)
+            .addParameters(params.map { it.param })
+            .addCode(insertCode.build())
             .build()
     }
 

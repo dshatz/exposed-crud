@@ -8,7 +8,7 @@ class TypedQueriesGenerator(
     private val newModelMapping: MutableMap<EntityModel, ClassName>,
 ) {
     /**
-     * Generates a data class with all props except the auto-incemeneting ones.
+     * Generates a data class with all props except the auto-incrementing ones.
      */
     fun generateNewModel(model: EntityModel): TypeSpec {
 
@@ -25,7 +25,7 @@ class TypedQueriesGenerator(
             .filterNot { it.autoIncrementing }
             .forEach {
                 type.addProperty(PropertySpec.builder(it.nameInEntity, it.type).initializer(it.nameInEntity).build())
-                constructor.addParameter(ParameterSpec(it.nameInEntity, it.type))
+                constructor.addParameter(ParameterSpec.builder(it.nameInEntity, it.type).apply { it.default?.let(::defaultValue) }.build())
             }
         type.primaryConstructor(constructor.build())
         newModelMapping[model] = cls
