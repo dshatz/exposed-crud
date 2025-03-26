@@ -78,6 +78,7 @@ jobs:
     needs: test  # Runs only if tests pass.
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    environment: Maven publish
 
     steps:
       - name: Checkout Repository
