@@ -1,5 +1,6 @@
 package com.dshatz.exposeddataclass.ksp
 
+import com.dshatz.exposed_crud.*
 import com.dshatz.exposeddataclass.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*

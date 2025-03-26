@@ -1,6 +1,6 @@
-package com.dshatz.exposeddataclass.models
+package com.dshatz.exposed_crud.models
 
-import com.dshatz.exposeddataclass.*
+import com.dshatz.exposed_crud.*
 
 @Entity
 data class Movie(

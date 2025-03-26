@@ -1,9 +1,9 @@
-package com.dshatz.exposeddataclass.models
+package com.dshatz.exposed_crud.models
 
-import com.dshatz.exposeddataclass.Entity
-import com.dshatz.exposeddataclass.Id
-import com.dshatz.exposeddataclass.ForeignKey
-import com.dshatz.exposeddataclass.References
+import com.dshatz.exposed_crud.Entity
+import com.dshatz.exposed_crud.Id
+import com.dshatz.exposed_crud.ForeignKey
+import com.dshatz.exposed_crud.References
 
 @Entity
 data class CategoryTranslations(

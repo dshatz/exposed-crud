@@ -1,11 +1,11 @@
-package com.dshatz.exposeddataclass.typed
+package com.dshatz.exposed_crud.typed
 
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.InsertStatement
 
-data class CrudRepository<T, ID : Any, E : Any, N>(private val table: T, private val related: List<ColumnSet> = emptyList()) where T: IdTable<ID>, T: IEntityTable<E, N, ID>{
+data class CrudRepository<T, ID : Any, E : Any, N>(private val table: T, private val related: List<ColumnSet> = emptyList()) where T: IdTable<ID>, T: IEntityTable<E, N, ID> {
 
     private fun selectWithJoins(): Query {
         return if (related.isEmpty()) {

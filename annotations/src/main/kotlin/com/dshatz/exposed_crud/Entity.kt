@@ -1,4 +1,4 @@
-package com.dshatz.exposeddataclass
+package com.dshatz.exposed_crud
 
 /**
  * Mark a data class with this to generate Exposed table DSL.

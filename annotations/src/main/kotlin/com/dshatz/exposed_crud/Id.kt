@@ -1,4 +1,4 @@
-package com.dshatz.exposeddataclass
+package com.dshatz.exposed_crud
 
 /**
  * Marks the property as primary key and optionally autogenerate.

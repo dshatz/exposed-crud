@@ -4,7 +4,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
 }
 
 dependencies {
@@ -13,7 +13,6 @@ dependencies {
     implementation(libs.exposed.dao)
     implementation(project(":annotations"))
     ksp(project(":processor"))
-//    kspTest(project(":processor"))
     testImplementation(kotlin("test"))
     testRuntimeOnly("org.xerial:sqlite-jdbc:3.44.1.0")
 }

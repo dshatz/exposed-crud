@@ -1,6 +1,6 @@
 package com.dshatz.exposeddataclass
 
-import com.dshatz.exposeddataclass.typed.CrudRepository
+import com.dshatz.exposed_crud.typed.CrudRepository
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 

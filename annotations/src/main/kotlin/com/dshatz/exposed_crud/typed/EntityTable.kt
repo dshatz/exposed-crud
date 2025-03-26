@@ -1,4 +1,4 @@
-package com.dshatz.exposeddataclass.typed
+package com.dshatz.exposed_crud.typed
 
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IdTable

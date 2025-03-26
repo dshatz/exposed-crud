@@ -1,7 +1,8 @@
-package com.dshatz.exposeddataclass
+package com.dshatz.exposed_crud
 
-import com.dshatz.exposeddataclass.models.*
+import com.dshatz.exposed_crud.models.*
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import kotlin.test.*
 
@@ -21,14 +22,13 @@ class TestDB {
         }
     }
 
-    /*@Test
+    @Test
     fun `test insert`() = transaction {
-        *//*DirectorEntity.new {
-            name = "Alfred"
-        }
-        val inserted = DirectorEntity.find(DirectorTable.name eq "Alfred").first()
-        assertEquals("Alfred", inserted.name)*//*
-    }*/
+        val inserted = DirectorTable.repo.createReturning(Director_Data("Alfred"))
+        val found = DirectorTable.repo.select().where(DirectorTable.name eq "Alfred").first()
+        assertEquals("Alfred", found.name)
+        assertEquals(inserted, found)
+    }
 
     @Test
     fun `typed select all`() {
@@ -116,7 +116,8 @@ class TestDB {
     fun `foreign key with ref`(): Unit = transaction {
         val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
         val categoryId = CategoryTable.repo.createReturning(Category_Data()).id
-        println(CategoryTranslationsTable.repo.createWithRelated(
+        println(
+            CategoryTranslationsTable.repo.createWithRelated(
             CategoryTranslations(categoryId, "", "Latviski"),
             language = Language("lv")
         ))
@@ -142,17 +143,21 @@ class TestDB {
     @Test
     fun `back references`(): Unit = transaction {
         val category = CategoryTable.repo.createReturning(Category_Data())
-        CategoryTranslationsTable.repo.createWithRelated(CategoryTranslations(
+        CategoryTranslationsTable.repo.createWithRelated(
+            CategoryTranslations(
             category.id,
             "",
             "Latviski",
-        ), language = Language("lv"))
+        ), language = Language("lv")
+        )
 
-        CategoryTranslationsTable.repo.createWithRelated(CategoryTranslations(
+        CategoryTranslationsTable.repo.createWithRelated(
+            CategoryTranslations(
             category.id,
             "",
             "In english",
-        ), language = Language("en"))
+        ), language = Language("en")
+        )
         val withTranslations = CategoryTable.repo.withRelated(CategoryTranslationsTable).findById(category.id)
         assertNotNull(withTranslations?.translations)
         assertEquals(2, withTranslations?.translations?.size)

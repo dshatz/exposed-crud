@@ -1,7 +1,7 @@
 package com.dshatz.exposeddataclass
 
-import com.dshatz.exposeddataclass.typed.CrudRepository
-import com.dshatz.exposeddataclass.typed.IEntityTable
+import com.dshatz.exposed_crud.typed.CrudRepository
+import com.dshatz.exposed_crud.typed.IEntityTable
 import com.google.devtools.ksp.processing.KSPLogger
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
@@ -255,7 +255,7 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
                 convertingCode.addStatement("%N = row[%N],", it.nameInEntity, it.nameInDsl)
             }
         }
-        val member = MemberName("com.dshatz.exposeddataclass.typed", "parseReferencedEntity")
+        val member = MemberName("com.dshatz.exposed_crud.typed", "parseReferencedEntity")
         references.forEach { (column, refInfo) ->
             convertingCode.addStatement("%N = %M(row, %T),", column.nameInEntity, member, models[refInfo.related]!!.tableClass)
         }

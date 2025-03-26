@@ -1,4 +1,4 @@
-package com.dshatz.exposeddataclass
+package com.dshatz.exposed_crud
 
 /**
  * Specify default as exactly `literal` for example, 0, 1.0, 10L or 1f.

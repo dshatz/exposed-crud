@@ -1,4 +1,4 @@
-package com.dshatz.exposeddataclass
+package com.dshatz.exposed_crud
 
 @Target(AnnotationTarget.CLASS)
 /**

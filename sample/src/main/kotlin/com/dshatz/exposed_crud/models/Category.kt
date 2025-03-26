@@ -1,6 +1,9 @@
-package com.dshatz.exposeddataclass.models
+package com.dshatz.exposed_crud.models
 
-import com.dshatz.exposeddataclass.*
+import com.dshatz.exposed_crud.BackReference
+import com.dshatz.exposed_crud.Default
+import com.dshatz.exposed_crud.Entity
+import com.dshatz.exposed_crud.Id
 
 @Entity
 data class Category(
