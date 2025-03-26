@@ -1,5 +1,6 @@
 package com.dshatz.exposeddataclass.models
 
+import com.dshatz.exposeddataclass.BackReference
 import com.dshatz.exposeddataclass.Entity
 import com.dshatz.exposeddataclass.Id
 
@@ -8,4 +9,7 @@ data class Director(
     @Id(true)
     val id: Long,
     val name: String,
+
+    @BackReference(Movie::class)
+    val movies: List<Movie>? = null
 )

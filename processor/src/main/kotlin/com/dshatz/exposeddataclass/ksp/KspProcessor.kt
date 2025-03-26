@@ -4,6 +4,8 @@ import com.dshatz.exposeddataclass.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.LIST
+import com.squareup.kotlinpoet.ParameterizedTypeName
 import com.squareup.kotlinpoet.STRING
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.toTypeName
@@ -30,7 +32,7 @@ class KspProcessor(
                 logger.warn(it.toString())
             }
 
-            val generator = Generator(models)
+            val generator = Generator(models, logger)
             val files = generator.generate()
             files.forEach { (model, file) ->
                 file.writeTo(codeGenerator, true, listOf(model.declaration.containingFile!!))
@@ -57,6 +59,7 @@ class KspProcessor(
         val idProps = entityClass.findPropsWithAnnotation(Id::class)
 
         val referenceProps = props.filter { it.getAnnotation(References::class) != null }
+        val backReferenceProps = props.filter { it.getAnnotation(BackReference::class) != null }
 
         fun computeProp(declaration: KSPropertyDeclaration): ColumnModel {
             val name = declaration.getPropName()
@@ -90,15 +93,30 @@ class KspProcessor(
             )
         }
 
-        val columns = (props - referenceProps).associateWith { declaration ->
+        val columns = (props - referenceProps - backReferenceProps).associateWith { declaration ->
             computeProp(declaration)
         }
 
         val refColumns = referenceProps.associate { declaration ->
             val prop = computeProp(declaration)
-            val ref = ReferenceInfo(
+            if (!prop.type.isNullable) throw ProcessorException("@References annotated props should be nullable and have default null.", declaration)
+            val ref = ReferenceInfo.WithFK(
                 related = declaration.getAnnotation(References::class)?.getArgumentAs<KSType>(0)?.toTypeName()!!,
                 localIdProps = declaration.getAnnotation(References::class)?.getArgumentAs<List<String>>(1)!!.toTypedArray()
+            )
+            prop to ref
+        }
+
+        val backRefColumns = backReferenceProps.associate { declaration ->
+            val prop = computeProp(declaration)
+            if (!prop.type.isNullable) throw ProcessorException("@BackReference annotated props should be nullable and have default null.", declaration)
+            val baseType = prop.type.run {
+                if (this is ParameterizedTypeName) this.rawType
+                else this
+            }.copy(nullable = false)
+            val ref = ReferenceInfo.Reverse(
+                related = declaration.getAnnotation(BackReference::class)?.getArgumentAs<KSType>(0)?.toTypeName()!!,
+                isMany = baseType == LIST
             )
             prop to ref
         }
@@ -117,7 +135,8 @@ class KspProcessor(
             tableName = tableName,
             columns = columns.values.toList(),
             primaryKey = primaryKey,
-            references = refColumns
+            references = refColumns,
+            backReferences = backRefColumns
         )
     }
 

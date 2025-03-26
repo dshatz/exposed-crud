@@ -2,6 +2,7 @@ package com.dshatz.exposeddataclass
 
 import com.dshatz.exposeddataclass.typed.CrudRepository
 import com.dshatz.exposeddataclass.typed.IEntityTable
+import com.google.devtools.ksp.processing.KSPLogger
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import org.jetbrains.exposed.dao.id.CompositeID
@@ -10,10 +11,8 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.statements.UpdateBuilder
-import javax.swing.table.TableModel
-import kotlin.uuid.ExperimentalUuidApi
 
-class Generator(private val models: Map<ClassName, EntityModel>) {
+class Generator(private val models: Map<ClassName, EntityModel>, private val logger: KSPLogger) {
 
     private val newModelMapping: MutableMap<EntityModel, ClassName> = mutableMapOf()
     private val typedQueriesGenerator: TypedQueriesGenerator? = TypedQueriesGenerator(newModelMapping)
@@ -79,7 +78,7 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
                 }
                 .addFunction(generateFindById(tableModel))
                 .apply {
-                    if (tableModel.references.isNotEmpty() || tableModel.columns.any { it.foreignKey != null }) {
+                    if (tableModel.columns.any { it.foreignKey != null }) {
                         addFunction(generateInsertWithRelated(tableModel))
                     }
                 }
@@ -211,6 +210,39 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
     }
 
     /**
+     * Given a model and reference belonging to a column on that model, return a list of columns with FKs relating to that reference.
+     */
+    private fun getForeignKeysForReference(tableModel: EntityModel, referenceInfo: ReferenceInfo.WithFK): Collection<ColumnModel> {
+        val specifiedColumns = referenceInfo.localIdProps.takeUnless { it.isEmpty() }?.toList()
+        logger.warn("Reference ${tableModel.originalClassName.simpleName} -> ${referenceInfo.related}. Specified columns = $specifiedColumns")
+        return if (specifiedColumns == null) {
+            // Find matching foreign keys
+            val fkColumns = tableModel.columns.filter {
+                it.foreignKey?.related == referenceInfo.related
+            }.associateBy { it.nameInDsl }
+
+            logger.warn("fkColumns = $fkColumns")
+
+            val relatedModel = models[referenceInfo.related]!!
+            relatedModel.primaryKey.forEach {
+                if (it.nameInDsl !in fkColumns) throw ProcessorException("@Reference(${relatedModel.originalClassName.simpleName}) defined but no sufficient ForeignKeys found. Expected @ForeignKey annotated columns ${relatedModel.primaryKey.map { it.nameInDsl }}", tableModel.declaration)
+            }
+            fkColumns.values
+        } else specifiedColumns.map { name -> tableModel.columns.find { it.nameInDsl == name }!! }
+    }
+
+    /**
+     * Given a FKInfo, return the referenced column on the related table.
+     */
+    private fun getForeignKeyColumn(foreignKey: FKInfo): ColumnModel {
+        val relatedModel = models[foreignKey.related]!!
+        if (foreignKey.onlyColumn != null) return relatedModel.columns.find { it.nameInDsl == foreignKey.onlyColumn }!!
+        else {
+            return (relatedModel.primaryKey as PrimaryKey.Simple).prop
+        }
+    }
+
+    /**
      * Generates a toEntity(ResultRow): Model.
      */
     private fun EntityModel.generateToEntityConverter(): FunSpec {
@@ -227,10 +259,34 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
         references.forEach { (column, refInfo) ->
             convertingCode.addStatement("%N = %M(row, %T),", column.nameInEntity, member, models[refInfo.related]!!.tableClass)
         }
+        backReferences.forEach { (column, refinfo) ->
+            val relatedModel = models[refinfo.related]!!
+            val (remoteColumn, remoteReference) = relatedModel.references.entries.find { it.value.related == this.originalClassName }
+                ?: throw ProcessorException("Could not find @Reference on ${relatedModel.originalClassName} that matches this @BackReference", column.declaration)
+
+            val remoteColumns = getForeignKeysForReference(relatedModel, remoteReference)
+
+            val whereClause = CodeBlock.builder()
+            remoteColumns.forEachIndexed { idx, col ->
+                val localCol = getForeignKeyColumn(col.foreignKey!!).nameInDsl
+                val remoteCol = col.nameInDsl
+                whereClause.add("%T.%N.eq(row[%N])", relatedModel.tableClass, remoteCol, localCol, )
+            }
+            val code = CodeBlock.builder().addNamed("%localProp:N = if (%relTable:T in related) %relTable:T.repo.select()", mapOf(
+                "localProp" to column.nameInEntity,
+                "relTable" to relatedModel.tableClass
+            )).beginControlFlow(".where")
+                .add("%L\n", whereClause.build())
+                .endControlFlow()
+                .add(".toList() else null,")
+                .build()
+            convertingCode.addStatement("%L", code)
+        }
         val toEntity = FunSpec.builder("toEntity")
             .addModifiers(KModifier.OVERRIDE)
             .returns(originalClassName)
             .addParameter("row", ResultRow::class)
+            .addParameter(ParameterSpec.builder("related", LIST.parameterizedBy(ColumnSet::class.asTypeName())).build())
             .addStatement("return %T(\n%L)", originalClassName, convertingCode.build())
             .build()
         return toEntity
@@ -370,35 +426,51 @@ class Generator(private val models: Map<ClassName, EntityModel>) {
         data class RelatedInfo(
             val relatedModel: EntityModel,
             val param: ParameterSpec,
-            val relatedField: ColumnModel,
-            val localColumn: ColumnModel
+            val relatedField: Collection<ColumnModel>,
+            val localColumn: Collection<ColumnModel>
         )
 
-        val params = foreignKeys.map { it ->
-            val fk = it.foreignKey!!
-            val relatedModel = models[fk.related]!!
+        val params = model.references.map { (it, ref) ->
+//            val columns = getReferenceColumns(model, ref)
+            val relatedModel = models[ref.related]!!
+//            val fk = it.foreignKey!!
             val paramName = relatedModel.originalClassName.simpleName.decapitate()
             val type = newModelMapping[relatedModel] ?: relatedModel.originalClassName
-            val onRemoteCol = relatedModel.columns.find { it.nameInDsl == fk.onlyColumn } ?: relatedModel.primaryKey.single()
+            val localFKColumns = getForeignKeysForReference(model, ref)
+            val remoteColumns = localFKColumns.map {
+                getForeignKeyColumn(it.foreignKey!!)
+            }
             RelatedInfo(
                 relatedModel,
                 ParameterSpec.builder(paramName, type.copy(nullable = true))
                     .defaultValue("null").build(),
-                onRemoteCol,
-                it
+                remoteColumns,
+                localFKColumns
             )
         }
 
         val insertCode = CodeBlock.builder().beginControlFlow("return %M", MemberName("org.jetbrains.exposed.sql.transactions", "transaction"))
-        params.forEach { (relatedModel, param, remoteColumn, localColumn) ->
-            val valRelatedId = param.name + remoteColumn.nameInDsl.capitalize()
-            insertCode.addStatement("val %N = %N?.let { %T.repo.createReturning(%L).%N }", valRelatedId, param.name, relatedModel.tableClass, param.name, remoteColumn.nameInEntity)
-            insertCode.addStatement("//$remoteColumn")
+        params.forEach { (relatedModel, param, remoteColumns, localColumns) ->
+            val localIds = localColumns.joinToString(", ") { it.nameInDsl }
+            val remoteIds = remoteColumns.joinToString("; ") { it.nameInDsl }
+            val remoteModelValName = relatedModel.originalClassName.simpleName.decapitate()
+            insertCode.addStatement(
+                "val %N = %N?.let { %T.repo.createReturning(%L) }",
+                remoteModelValName,
+                param.name,
+                relatedModel.tableClass,
+                param.name
+            )
+            localColumns.zip(remoteColumns).forEach { (localCol, remoteCol) ->
+                insertCode.addStatement("val %N = %N?.%N", localCol.nameInDsl, remoteModelValName, remoteCol.nameInEntity)
+            }
+            insertCode.addStatement("//$remoteColumns")
         }
         val copyCode = CodeBlock.builder().add("%N.copy(\n", modelParamName)
-        params.forEach { (relatedModel, param, remoteColumn, localColumn) ->
-            val withId = param.name + remoteColumn.nameInDsl.capitalize()
-            copyCode.add("%N = %N ?: %N.%N,\n", localColumn.nameInDsl, withId, modelParamName, localColumn.nameInDsl)
+        params.forEach { (relatedModel, param, remoteColumn, localColumns) ->
+            localColumns.forEach { localCol ->
+                copyCode.add("%N = %N ?: %N.%N,\n", localCol.nameInDsl, localCol.nameInDsl, modelParamName, localCol.nameInDsl)
+            }
         }
         copyCode.add(")")
 

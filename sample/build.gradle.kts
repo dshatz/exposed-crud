@@ -3,6 +3,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+kotlin {
+    jvmToolchain(21)
+}
+
 dependencies {
     implementation(libs.exposed.core)
     implementation(libs.exposed.jdbc)

@@ -1,9 +1,7 @@
 package com.dshatz.exposeddataclass
 
 import com.dshatz.exposeddataclass.models.*
-import com.dshatz.exposeddataclass.models.CategoryTable.toEntityList
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import kotlin.test.*
 
@@ -139,6 +137,44 @@ class TestDB {
 
         assertNotEquals(-1, movie.directorId)
         assertNotEquals(-1, movie.categoryId)
+    }
+
+    @Test
+    fun `back references`(): Unit = transaction {
+        val category = CategoryTable.repo.createReturning(Category_Data())
+        CategoryTranslationsTable.repo.createWithRelated(CategoryTranslations(
+            category.id,
+            "",
+            "Latviski",
+        ), language = Language("lv"))
+
+        CategoryTranslationsTable.repo.createWithRelated(CategoryTranslations(
+            category.id,
+            "",
+            "In english",
+        ), language = Language("en"))
+        val withTranslations = CategoryTable.repo.withRelated(CategoryTranslationsTable).findById(category.id)
+        assertNotNull(withTranslations?.translations)
+        assertEquals(2, withTranslations?.translations?.size)
+        assertEquals("Latviski", withTranslations?.translations?.find { it.languageCode == "lv" }?.translation)
+        assertEquals("In english", withTranslations?.translations?.find { it.languageCode == "en" }?.translation)
+
+        val director = DirectorTable.repo.createReturning(Director_Data("Alfred"))
+        val movie1 = MovieTable.repo.createReturning(
+            Movie_Data("The birds", originalTitle = null, directorId = director.id, categoryId = category.id),
+        )
+
+        val movie2 = MovieTable.repo.createReturning(
+            Movie_Data("The birds 2", originalTitle = null, directorId = director.id, categoryId = category.id),
+        )
+
+        val directorWithMovies = DirectorTable.repo.withRelated(MovieTable).findById(director.id)
+        assertNotNull(directorWithMovies?.movies)
+        assertEquals(setOf(movie1, movie2), directorWithMovies?.movies?.toSet())
+
+        val categoryWithMovies = CategoryTable.repo.withRelated(MovieTable).findById(category.id)
+        assertNotNull(categoryWithMovies?.movies)
+        assertEquals(setOf(movie1, movie2), categoryWithMovies?.movies?.toSet())
     }
 
 

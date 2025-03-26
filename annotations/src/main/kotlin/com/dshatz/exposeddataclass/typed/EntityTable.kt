@@ -1,11 +1,12 @@
 package com.dshatz.exposeddataclass.typed
 
 import org.jetbrains.exposed.dao.id.EntityID
+import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.statements.UpdateBuilder
 
 interface IEntityTable<T, N, ID: Any> {
-    fun toEntity(row: ResultRow): T {
+    fun toEntity(row: ResultRow, related: List<ColumnSet> = emptyList()): T {
         error("Not implemented")
     }
 

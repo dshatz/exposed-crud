@@ -15,7 +15,8 @@ data class EntityModel(
     val tableName: String,
     val columns: List<ColumnModel>,
     val primaryKey: PrimaryKey,
-    val references: Map<ColumnModel, ReferenceInfo>
+    val references: Map<ColumnModel, ReferenceInfo.WithFK>,
+    val backReferences: Map<ColumnModel, ReferenceInfo.Reverse>
 ) {
 
     override fun toString(): String {
@@ -137,4 +138,7 @@ sealed class PrimaryKey: Iterable<ColumnModel> {
 
 data class FKInfo(val related: TypeName, val onlyColumn: String? = null)
 
-data class ReferenceInfo(val related: TypeName, val localIdProps: Array<String>)
+sealed class ReferenceInfo(open val related: TypeName) {
+    data class WithFK(override val related: TypeName, val localIdProps: Array<String>): ReferenceInfo(related)
+    data class Reverse(override val related: TypeName, val isMany: Boolean): ReferenceInfo(related)
+}
