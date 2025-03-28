@@ -193,5 +193,31 @@ class TestDB {
         assertEquals(setOf(movie1, movie2), categoryWithMovies?.movies?.toSet())
     }
 
+    @Test
+    fun `delete by primary key`() = transaction {
+        val repo = LanguageTable.repo
+        val language = repo.createReturning(Language("lv"))
+        assertEquals(language, repo.findById("lv"))
+        repo.delete(language)
+        assertNull(repo.findById("lv"))
+    }
+
+    @Test
+    fun `delete by composite primary key`() = transaction {
+        val repo = CategoryTranslationsTable.repo.withRelated(CategoryTable, LanguageTable)
+
+        val created = repo.createWithRelated(CategoryTranslations(
+            -1,
+            "lv",
+            "Sveiki",
+            Category(),
+            language = Language("lv")
+        ))
+        assertNotNull(repo.findById(created.categoryId, created.languageCode))
+        val deletedCount = repo.delete(created)
+        assertEquals(1, deletedCount)
+        assertNull(repo.findById(created.categoryId, created.languageCode))
+    }
+
 
 }

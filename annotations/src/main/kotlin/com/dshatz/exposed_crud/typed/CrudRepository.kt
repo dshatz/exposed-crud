@@ -3,6 +3,7 @@ package com.dshatz.exposed_crud.typed
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.statements.InsertStatement
 
 data class CrudRepository<T, ID : Any, E : Any>(private val table: T, val related: List<ColumnSet> = emptyList()) where T: IdTable<ID>, T: IEntityTable<E, ID> {
@@ -147,5 +148,16 @@ data class CrudRepository<T, ID : Any, E : Any>(private val table: T, val relate
 
     fun findOne(where: SqlExpressionBuilder.() -> Op<Boolean>): E? {
         return select().where(where).limit(1).firstOrNull()
+    }
+
+    /**
+     * Deletes given entity by primary key.
+     */
+    fun delete(data: E, limit: Int? = null): Int {
+        return with (table) {
+            deleteWhere(limit = limit) {
+                table.id eq table.makePK(data)
+            }
+        }
     }
 }
