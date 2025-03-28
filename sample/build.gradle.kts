@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.jvm)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.serial)
 }
 
 kotlin {
@@ -11,6 +12,7 @@ dependencies {
     implementation(libs.exposed.core)
     implementation(libs.exposed.jdbc)
     implementation(libs.exposed.dao)
+    implementation(libs.serial)
     implementation(project(":annotations"))
     ksp(project(":processor"))
     testImplementation(kotlin("test"))

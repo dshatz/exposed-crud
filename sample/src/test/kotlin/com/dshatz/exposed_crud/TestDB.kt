@@ -9,6 +9,7 @@ import kotlin.test.*
 class TestDB {
 
     private lateinit var db: Database
+
     @BeforeTest
     fun init() {
         db = Database.connect("jdbc:sqlite:memory:?foreign_keys=on", "org.sqlite.JDBC")
@@ -24,7 +25,7 @@ class TestDB {
 
     @Test
     fun `test insert`() = transaction {
-        val inserted = DirectorTable.repo.createReturning(Director_Data("Alfred"))
+        val inserted = DirectorTable.repo.createReturning(Director(0, "Alfred"))
         val found = DirectorTable.repo.select().where(DirectorTable.name eq "Alfred").first()
         assertEquals("Alfred", found.name)
         assertEquals(inserted, found)
@@ -44,29 +45,29 @@ class TestDB {
 
     @Test
     fun `typed insert`() = transaction {
-        DirectorTable.repo.create(Director_Data("Bob"))
+        DirectorTable.repo.create(Director(name = "Bob"))
         assertEquals("Bob", DirectorTable.repo.selectAll().first().name)
     }
 
     @Test
     fun `update custom where`() = transaction {
-        DirectorTable.repo.create(Director_Data("Bob"))
+        DirectorTable.repo.create(Director(name = "Bob"))
         val id = DirectorTable.repo.selectAll().find { it.name == "Bob" }!!.id
-        DirectorTable.repo.update({ DirectorTable.id eq id }, Director_Data("Marley"))
+        DirectorTable.repo.update({ DirectorTable.id eq id }, Director(name = "Marley"))
 
         assertEquals("Marley", DirectorTable.repo.selectAll().first().name)
     }
 
     @Test
     fun `update by simple primary key`() = transaction {
-        val id = DirectorTable.repo.createReturning(Director_Data("Bob")).id
+        val id = DirectorTable.repo.createReturning(Director(name = "Bob")).id
         DirectorTable.repo.update(Director(id, "Marley"))
         assertEquals("Marley", DirectorTable.repo.selectAll().first().name)
     }
 
     @Test
     fun `select where`() = transaction {
-        val id = DirectorTable.repo.createReturning(Director_Data("Bob")).id
+        val id = DirectorTable.repo.createReturning(Director(name = "Bob")).id
         val director = DirectorTable.repo.select().where {
             DirectorTable.name eq "Bob"
         }.first()
@@ -77,7 +78,7 @@ class TestDB {
 
     @Test
     fun `find by id`() = transaction {
-        val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
+        val directorId = DirectorTable.repo.createReturning(Director(name = "Alfred")).id
 
         val found = DirectorTable.repo.findById(directorId)
         assertNotNull(found)
@@ -88,7 +89,7 @@ class TestDB {
     fun `composite ids`(): Unit = transaction {
         val lang = "lv"
         LanguageTable.repo.create(Language(lang))
-        val catId = CategoryTable.repo.createReturning(Category_Data()).id
+        val catId = CategoryTable.repo.createReturning(Category()).id
         CategoryTranslationsTable.repo.create(
             CategoryTranslations(
                 catId, lang, "Latviski"
@@ -102,26 +103,20 @@ class TestDB {
     }
 
     @Test
-    fun `foreign key`(): Unit = transaction {
-        val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        LanguageTable.repo.insert(Language("lv"))
-//        val catId = CategoryTable.repo.createWithRelated(Category_Data(0), CategoryTranslations(0, "lv", "Latviski")).id
-
-        /*MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, catId))
-        val movie = MovieTable.repo.select().where(MovieTable.directorId eq directorId).first()
-        assertEquals("The Birds", movie.title)*/
-    }
-
-    @Test
     fun `foreign key with ref`(): Unit = transaction {
-        val directorId = DirectorTable.repo.createReturning(Director_Data("Alfred")).id
-        val categoryId = CategoryTable.repo.createReturning(Category_Data()).id
+        val directorId = DirectorTable.repo.createReturning(Director(name = "Alfred")).id
+        val categoryId = CategoryTable.repo.createReturning(Category()).id
+        val lv = LanguageTable.repo.insertReturning(Language("lv"))
         println(
             CategoryTranslationsTable.repo.createWithRelated(
-            CategoryTranslations(categoryId, "", "Latviski"),
-            language = Language("lv")
-        ))
-        MovieTable.repo.create(Movie_Data("The Birds", "01-01-1963", null, directorId, categoryId))
+                CategoryTranslations(
+                    categoryId,
+                    languageCode = lv.code,
+                    "Latviski"
+                ),
+            )
+        )
+        MovieTable.repo.create(Movie(id = -1, "The Birds", "01-01-1963", null, directorId, categoryId))
 
         val movieWithDirector = MovieTable.repo.withRelated(DirectorTable).selectAll().first()
         assertEquals("Alfred", movieWithDirector.director?.name)
@@ -130,47 +125,63 @@ class TestDB {
 
     @Test
     fun `insert with related`() = transaction {
-        val movie = MovieTable.repo.createWithRelated(
-            movie = Movie_Data("Die Hard", "",  null, -1, -1),
-            director = Director_Data("John McTiernan"),
-            category = Category_Data()
+        val movieWithDirectorOnly = MovieTable.repo.withRelated(DirectorTable, CategoryTable).createWithRelated(
+            movie = Movie(
+                title = "Die Hard",
+                directorId = -1,
+                categoryId = -1,
+                director = Director(name = "John McTiernan"),
+                category = Category()
+            )
         )
 
-        assertNotEquals(-1, movie.directorId)
-        assertNotEquals(-1, movie.categoryId)
+        assertNotEquals(-1, movieWithDirectorOnly.directorId)
+        assertNotEquals(-1, movieWithDirectorOnly.categoryId)
     }
 
     @Test
     fun `back references`(): Unit = transaction {
-        val category = CategoryTable.repo.createReturning(Category_Data())
-        CategoryTranslationsTable.repo.createWithRelated(
-            CategoryTranslations(
-            category.id,
-            "",
-            "Latviski",
-        ), language = Language("lv")
-        )
+        val category = CategoryTable.repo.createReturning(Category())
+        val catId = CategoryTranslationsTable.repo
+            .withRelated(LanguageTable, CategoryTable)
+            .createWithRelated(
+                CategoryTranslations(
+                    category.id,
+                    "",
+                    language = Language("lv"),
+                    translation = "Latviski",
+                )
+            ).run {
+                categoryId to languageCode
+            }
 
-        CategoryTranslationsTable.repo.createWithRelated(
-            CategoryTranslations(
-            category.id,
-            "",
-            "In english",
-        ), language = Language("en")
-        )
+        val translation = CategoryTranslationsTable.repo.withRelated(CategoryTable, LanguageTable).findById(catId.first, catId.second)
+        assertEquals(category, translation?.category)
+        assertEquals("lv", translation?.language?.code)
+
+        CategoryTranslationsTable.repo
+            .withRelated(LanguageTable)
+            .createWithRelated(
+                CategoryTranslations(
+                    category.id,
+                    "",
+                    "In english",
+                    language = Language("en")
+                )
+            )
         val withTranslations = CategoryTable.repo.withRelated(CategoryTranslationsTable).findById(category.id)
         assertNotNull(withTranslations?.translations)
         assertEquals(2, withTranslations?.translations?.size)
         assertEquals("Latviski", withTranslations?.translations?.find { it.languageCode == "lv" }?.translation)
         assertEquals("In english", withTranslations?.translations?.find { it.languageCode == "en" }?.translation)
 
-        val director = DirectorTable.repo.createReturning(Director_Data("Alfred"))
+        val director = DirectorTable.repo.createReturning(Director(name = "Alfred"))
         val movie1 = MovieTable.repo.createReturning(
-            Movie_Data("The birds", originalTitle = null, directorId = director.id, categoryId = category.id),
+            Movie(title = "The birds", directorId = director.id, categoryId = category.id),
         )
 
         val movie2 = MovieTable.repo.createReturning(
-            Movie_Data("The birds 2", originalTitle = null, directorId = director.id, categoryId = category.id),
+            Movie(title = "The birds 2", directorId = director.id, categoryId = category.id),
         )
 
         val directorWithMovies = DirectorTable.repo.withRelated(MovieTable).findById(director.id)

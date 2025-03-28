@@ -8,7 +8,7 @@ import com.dshatz.exposed_crud.Id
 @Entity
 data class Category(
     @Id(autoGenerate = true)
-    val id: Long,
+    val id: Long = -1,
     @Default("false")
     val adult: Boolean = false,
 

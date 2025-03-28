@@ -3,7 +3,7 @@ package com.dshatz.exposed_crud.typed
 import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 
-data class TypedSelect<T, E, ID: Any>(val table: T, private val query: Query): Iterable<E> where T: IdTable<ID>, T: IEntityTable<E, *, ID> {
+data class TypedSelect<T, E, ID: Any>(val table: T, private val query: Query): Iterable<E> where T: IdTable<ID>, T: IEntityTable<E, ID> {
 
 
     fun where(predicate: SqlExpressionBuilder.() -> Op<Boolean>) = copy(query = query.where(predicate))

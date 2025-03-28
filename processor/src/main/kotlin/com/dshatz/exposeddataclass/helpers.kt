@@ -1,7 +1,10 @@
 package com.dshatz.exposeddataclass
 
 import com.google.devtools.ksp.symbol.*
+import com.squareup.kotlinpoet.AnnotationSpec
+import com.squareup.kotlinpoet.ClassName
 import com.squareup.kotlinpoet.CodeBlock
+import com.squareup.kotlinpoet.ksp.toTypeName
 import kotlin.reflect.KClass
 
 @Throws(ProcessorException::class)
@@ -55,4 +58,21 @@ inline fun <reified T> KSAnnotation.getArgumentAs(index: Int = 0): T? {
     return arguments.getOrNull(index)?.value?.let {
         it as T
     }
+}
+
+fun KSAnnotation.parse(): AnnotationInfo = AnnotationInfo(
+    cls = annotationType.toTypeName() as ClassName,
+    params = arguments.mapIndexedNotNull { idx, arg ->
+        val default = defaultArguments.getOrNull(idx)
+        if (arg.value == default?.value) null
+        else arg.value
+    }
+)
+
+fun AnnotationInfo.generate(): AnnotationSpec {
+    val a = AnnotationSpec.builder(cls)
+    params.forEach {
+        a.addMember(CodeBlock.of(it.toString()))
+    }
+    return a.build()
 }

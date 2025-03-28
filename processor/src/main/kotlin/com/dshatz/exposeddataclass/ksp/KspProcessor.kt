@@ -4,10 +4,7 @@ import com.dshatz.exposed_crud.*
 import com.dshatz.exposeddataclass.*
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
-import com.squareup.kotlinpoet.CodeBlock
-import com.squareup.kotlinpoet.LIST
-import com.squareup.kotlinpoet.ParameterizedTypeName
-import com.squareup.kotlinpoet.STRING
+import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ksp.toClassName
 import com.squareup.kotlinpoet.ksp.toTypeName
 import com.squareup.kotlinpoet.ksp.writeTo
@@ -62,6 +59,10 @@ class KspProcessor(
         val referenceProps = props.filter { it.getAnnotation(References::class) != null }
         val backReferenceProps = props.filter { it.getAnnotation(BackReference::class) != null }
 
+        val annotations = entityClass.annotations
+            .filterNot { it.annotationType.toTypeName() == Entity::class.asTypeName() }
+            .map { it.parse() }
+
         fun computeProp(declaration: KSPropertyDeclaration): ColumnModel {
             val name = declaration.getPropName()
             val type = declaration.type.toTypeName()
@@ -82,12 +83,20 @@ class KspProcessor(
 
             val autoIncrement = declaration.getAnnotation(Id::class)?.getArgumentAs<Boolean>() == true
 
+            val propAnnotations = declaration.annotations.filterNot {
+                (it.annotationType.toTypeName() as ClassName).packageName == Column::class.asClassName().packageName
+            }.map {
+//                throw (ProcessorException("Annotation args: ${it.arguments}, default: ${it.defaultArguments}", it))
+                it.parse()
+            }
+
             return ColumnModel(
                 declaration = declaration,
                 nameInEntity = name,
                 columnName = columnName,
                 nameInDsl = name.takeUnless { idProps.size == 1 && idProps.first().first.getPropName() == name } ?: "id",
                 type = declaration.type.toTypeName(),
+                annotations = propAnnotations.toList(),
                 autoIncrementing = autoIncrement,
                 default = default,
                 foreignKey = foreignKey
@@ -135,6 +144,7 @@ class KspProcessor(
             originalClassName = entityClass.toClassName(),
             tableName = tableName,
             columns = columns.values.toList(),
+            annotations = annotations.toList(),
             primaryKey = primaryKey,
             references = refColumns,
             backReferences = backRefColumns

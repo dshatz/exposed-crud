@@ -1,5 +1,6 @@
 package com.dshatz.exposeddataclass
 
+import com.dshatz.exposed_crud.typed.CrudRepository
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.squareup.kotlinpoet.*
@@ -14,6 +15,7 @@ data class EntityModel(
     val originalClassName: ClassName,
     val tableName: String,
     val columns: List<ColumnModel>,
+    val annotations: List<AnnotationInfo>,
     val primaryKey: PrimaryKey,
     val references: Map<ColumnModel, ReferenceInfo.WithFK>,
     val backReferences: Map<ColumnModel, ReferenceInfo.Reverse>
@@ -107,6 +109,14 @@ data class EntityModel(
         private val entityCompanionTypes = simpleIdTypes.associateWith {
             ClassName("org.jetbrains.exposed.dao", it.simpleName + "EntityClass")
         }
+
+        fun EntityModel.crudRepositoryType(): ParameterizedTypeName {
+            return CrudRepository::class.asTypeName().parameterizedBy(
+                tableClass,
+                idType(),
+                originalClassName,
+            )
+        }
     }
 }
 
@@ -116,6 +126,7 @@ data class ColumnModel(
     val columnName: String,
     val nameInDsl: String,
     val type: TypeName,
+    val annotations: List<AnnotationInfo>,
     val autoIncrementing: Boolean,
     val default: CodeBlock?,
     val foreignKey: FKInfo?
@@ -142,3 +153,5 @@ sealed class ReferenceInfo(open val related: TypeName) {
     data class WithFK(override val related: TypeName, val localIdProps: Array<String>): ReferenceInfo(related)
     data class Reverse(override val related: TypeName, val isMany: Boolean): ReferenceInfo(related)
 }
+
+data class AnnotationInfo(val cls: ClassName, val params: List<Any?>)

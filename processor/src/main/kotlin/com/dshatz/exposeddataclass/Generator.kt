@@ -1,7 +1,7 @@
 package com.dshatz.exposeddataclass
 
-import com.dshatz.exposed_crud.typed.CrudRepository
 import com.dshatz.exposed_crud.typed.IEntityTable
+import com.dshatz.exposeddataclass.EntityModel.Companion.crudRepositoryType
 import com.google.devtools.ksp.processing.KSPLogger
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
@@ -25,18 +25,12 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
         return models.values.associateWith { tableModel ->
             val fileSpec = FileSpec.builder(tableModel.tableClass)
 
-            val newModel = if (tableModel.columns.any { it.autoIncrementing } && tableModel.columns.any { !it.autoIncrementing })
-                typedQueriesGenerator?.generateNewModel(tableModel)
-            else null
-
-            val newModelClass = newModelMapping[tableModel] ?: tableModel.originalClassName
-
 
             validateForeignKeyAnnotations(tableModel)
             validateReferenceAnnotations(tableModel)
             // object Tasks : <Int>IdTable("tasks") {
             val tableDef = TypeSpec.objectBuilder(tableModel.tableClass)
-                .addSuperinterface(IEntityTable::class.asTypeName().parameterizedBy(tableModel.originalClassName, newModelClass, tableModel.idType()))
+                .addSuperinterface(IEntityTable::class.asTypeName().parameterizedBy(tableModel.originalClassName, tableModel.idType()))
 
             val primaryKeyInit = when (tableModel.primaryKey) {
                 is PrimaryKey.Composite -> CodeBlock.of("PrimaryKey(%L)", tableModel.primaryKey.props.joinToString(", ") { it.nameInDsl })
@@ -60,21 +54,10 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
             tableDef.addFunction(generatePKMaker(tableModel))
             tableDef.addTableSuperclass(tableModel)
 
-            /*if (tableModel.primaryKey is PrimaryKey.Composite) tableDef.addInitializerBlock(
-                CodeBlock.builder()
-                    .apply {
-                        tableModel.primaryKey.forEach {
-                            addStatement("addIdColumn(%N)", it.nameInDsl)
-                        }
-                    }.build()
-            )*/
-
-
             fileSpec
                 .addType(tableDef.build())
                 .apply {
-                    newModel?.let { addType(it) }
-                    typedQueriesGenerator?.generateTypesQueries(tableModel)?.let { addProperty(it) }
+                    typedQueriesGenerator?.generateRepoAccessors(tableModel)?.forEach { addProperty(it) }
                 }
                 .addFunction(generateFindById(tableModel))
                 .apply {
@@ -270,7 +253,13 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
             remoteColumns.forEachIndexed { idx, col ->
                 val localCol = getForeignKeyColumn(col.foreignKey!!).nameInDsl
                 val remoteCol = col.nameInDsl
-                whereClause.add("%T.%N.eq(row[%N])", relatedModel.tableClass, remoteCol, localCol, )
+                whereClause.add(
+                    "%T.%N.%M(row[%N])",
+                    relatedModel.tableClass,
+                    remoteCol,
+                    MemberName("org.jetbrains.exposed.sql.SqlExpressionBuilder","eq"),
+                    localCol,
+                )
             }
             val code = CodeBlock.builder().addNamed("%localProp:N = if (%relTable:T in related) %relTable:T.repo.select()", mapOf(
                 "localProp" to column.nameInEntity,
@@ -359,34 +348,6 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
         }
     }
 
-    /*private fun generateModelPrimaryKeyWhere(model: EntityModel): FunSpec {
-        val spec = FunSpec.builder("whereUsingPrimaryKey")
-            .addModifiers(KModifier.OVERRIDE)
-            .receiver(ISqlExpressionBuilder::class)
-            .addParameter("data", model.originalClassName)
-            .returns(Op::class.parameterizedBy(Boolean::class))
-        val code = CodeBlock.builder()
-        val primaryKeyColumns = model.columns.filter { it in model.primaryKey }
-        primaryKeyColumns.forEachIndexed { index, columnModel ->
-            val opCode = CodeBlock.of("(%N eq data.%N)", columnModel.nameInDsl, columnModel.nameInEntity)
-            if (index != 0) {
-                code.addStatement(".%M(%L)", and, opCode)
-            } else {
-                code.addStatement("%L", opCode)
-            }
-        }
-        return spec.addCode("return %L", code.build()).build()
-    }*/
-
-    private fun EntityModel.crudRepositoryType(): ParameterizedTypeName {
-        return CrudRepository::class.asTypeName().parameterizedBy(
-            tableClass,
-            idType(),
-            originalClassName,
-            newModelMapping[this] ?: originalClassName
-        )
-    }
-
     private fun generateFindById(model: EntityModel): FunSpec {
         val idCode = when (model.primaryKey) {
             is PrimaryKey.Composite -> {
@@ -417,23 +378,18 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
     }
 
     private fun generateInsertWithRelated(model: EntityModel): FunSpec {
-        val related = model.references.values
-
-        val foreignKeys = model.columns.filter { it.foreignKey != null }
-
         val modelParamName = model.originalClassName.simpleName.decapitate()
 
         data class RelatedInfo(
             val relatedModel: EntityModel,
-            val param: ParameterSpec,
+            val param: ParameterSpec?,
+            val refColumn: ColumnModel,
             val relatedField: Collection<ColumnModel>,
-            val localColumn: Collection<ColumnModel>
+            val localColumns: Collection<ColumnModel>
         )
 
-        val params = model.references.map { (it, ref) ->
-//            val columns = getReferenceColumns(model, ref)
+        val params = model.references.map { (refColumn, ref) ->
             val relatedModel = models[ref.related]!!
-//            val fk = it.foreignKey!!
             val paramName = relatedModel.originalClassName.simpleName.decapitate()
             val type = newModelMapping[relatedModel] ?: relatedModel.originalClassName
             val localFKColumns = getForeignKeysForReference(model, ref)
@@ -442,46 +398,84 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
             }
             RelatedInfo(
                 relatedModel,
-                ParameterSpec.builder(paramName, type.copy(nullable = true))
-                    .defaultValue("null").build(),
+                null,
+                refColumn,
                 remoteColumns,
                 localFKColumns
             )
         }
 
         val insertCode = CodeBlock.builder().beginControlFlow("return %M", MemberName("org.jetbrains.exposed.sql.transactions", "transaction"))
-        params.forEach { (relatedModel, param, remoteColumns, localColumns) ->
-            val localIds = localColumns.joinToString(", ") { it.nameInDsl }
-            val remoteIds = remoteColumns.joinToString("; ") { it.nameInDsl }
-            val remoteModelValName = relatedModel.originalClassName.simpleName.decapitate()
-            insertCode.addStatement(
-                "val %N = %N?.let { %T.repo.createReturning(%L) }",
-                remoteModelValName,
-                param.name,
-                relatedModel.tableClass,
-                param.name
-            )
+        params.forEach { (relatedModel, param, refColumn, remoteColumns, localColumns) ->
+            val repoHasRelated = CodeBlock.builder()
+                .addStatement("val has%N: Boolean = %T in related && %N.%N != null",
+                    relatedModel.originalClassName.simpleName,
+                    relatedModel.tableClass,
+                    modelParamName,
+                    refColumn.nameInEntity
+                ).build()
+
+            val getIdOrInsert = CodeBlock.builder()
+            getIdOrInsert.add("%L", repoHasRelated)
             localColumns.zip(remoteColumns).forEach { (localCol, remoteCol) ->
-                insertCode.addStatement("val %N = %N?.%N", localCol.nameInDsl, remoteModelValName, remoteCol.nameInEntity)
+                getIdOrInsert.beginControlFlow("val %N = if (has%N)", localCol.nameInEntity, relatedModel.originalClassName.simpleName)
+                    .addStatement("%T.repo.createReturning(%N.%N!!).%N", relatedModel.tableClass, modelParamName, refColumn.nameInEntity, remoteCol.nameInEntity)
+                    .nextControlFlow("else")
+                    .addStatement("%N.%N", modelParamName, localCol.nameInEntity)
+                    .endControlFlow()
             }
-            insertCode.addStatement("//$remoteColumns")
+            insertCode.add("%L", getIdOrInsert.build())
         }
         val copyCode = CodeBlock.builder().add("%N.copy(\n", modelParamName)
-        params.forEach { (relatedModel, param, remoteColumn, localColumns) ->
+        params.forEach { (relatedModel, param, refColumn, remoteColumn, localColumns) ->
             localColumns.forEach { localCol ->
-                copyCode.add("%N = %N ?: %N.%N,\n", localCol.nameInDsl, localCol.nameInDsl, modelParamName, localCol.nameInDsl)
+                copyCode.add("%N = %N,\n", localCol.nameInDsl, localCol.nameInDsl)
             }
         }
         copyCode.add(")")
 
-        insertCode.addStatement("%T.repo.createReturning(%L)", model.tableClass, copyCode.build())
+        insertCode.addStatement("createReturning(%L)", copyCode.build())
         insertCode.endControlFlow()
+
+        val docs = CodeBlock.builder().addNamed("""
+            `INSERT` [%model:T] with referenced entities.
+            
+            For example, to insert related model [%relatedModel:T] (`%relatedModelProp:L`), two conditions must be met.
+            1. This method is called on a [CrudRepository] with [%targetTable:T] added using [CrudRepository.withRelated].
+            2. Passed `%relatedModelProp:L` must not be null.
+            
+            If both the conditions are met, [%relatedModel:T] will be inserted and corresponding values will be assigned to columns of the relationship:
+            %localIdColumns:L
+            
+            Otherwise, `%dataParam:L` will be inserted as-is. 
+              
+            The same goes for the other relationships on [%model:T]: %otherRelationships:L
+        """.trimIndent(), mapOf(
+            "model" to model.originalClassName,
+            "dataParam" to modelParamName,
+            "relatedModelProp" to CodeBlock.of("%N.%L", modelParamName, params.first().refColumn.nameInEntity),
+            "relatedModel" to params.first().relatedModel.originalClassName,
+            "targetTable" to params.first().relatedModel.tableClass,
+            "localIdColumns" to CodeBlock.builder().apply {
+                val columns = params.first().localColumns
+                columns.forEachIndexed { idx, localCol ->
+                    add("[%T.%N]" + if (idx != columns.indices.last) ", " else "", model.originalClassName, localCol.nameInEntity)
+                }
+            }.build(),
+            "otherRelationships" to CodeBlock.builder().apply {
+                val otherParams = params.drop(1)
+                otherParams.forEachIndexed { idx, param ->
+                    add("[%T]" + if (idx != otherParams.indices.last) ", " else "", param.relatedModel.originalClassName)
+                }
+            }.build()
+        ))
 
         return FunSpec.builder("createWithRelated")
             .receiver(model.crudRepositoryType())
+            .addKdoc(docs.build())
             .addParameter(ParameterSpec(modelParamName, newModelMapping[model] ?: model.originalClassName))
             .returns(model.originalClassName)
-            .addParameters(params.map { it.param })
+            .addParameters(params.mapNotNull { it.param })
             .addCode(insertCode.build())
             .build()
     }

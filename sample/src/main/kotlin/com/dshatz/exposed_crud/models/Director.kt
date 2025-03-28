@@ -7,7 +7,7 @@ import com.dshatz.exposed_crud.Id
 @Entity
 data class Director(
     @Id(true)
-    val id: Long,
+    val id: Long = -1,
     val name: String,
 
     @BackReference(Movie::class)
