@@ -219,5 +219,13 @@ class TestDB {
         assertNull(repo.findById(created.categoryId, created.languageCode))
     }
 
+    @Test
+    fun `unique index`(): Unit = transaction {
+        DirectorTable.repo.apply {
+            create(Director(name = "Alfred"))
+            assertFails { create(Director(name = "Alfred")) }
+        }
+    }
+
 
 }

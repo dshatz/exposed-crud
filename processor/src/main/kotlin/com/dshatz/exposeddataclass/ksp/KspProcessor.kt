@@ -63,6 +63,8 @@ class KspProcessor(
             .filterNot { it.annotationType.toTypeName() == Entity::class.asTypeName() }
             .map { it.parse() }
 
+        val uniqueAnnotations = mutableMapOf<String, MutableList<ColumnModel>>()
+
         fun computeProp(declaration: KSPropertyDeclaration): ColumnModel {
             val name = declaration.getPropName()
             val type = declaration.type.toTypeName()
@@ -83,12 +85,6 @@ class KspProcessor(
 
             val autoIncrement = declaration.getAnnotation(Id::class)?.getArgumentAs<Boolean>() == true
 
-            val propAnnotations = declaration.annotations.filterNot {
-                (it.annotationType.toTypeName() as ClassName).packageName == Column::class.asClassName().packageName
-            }.map {
-//                throw (ProcessorException("Annotation args: ${it.arguments}, default: ${it.defaultArguments}", it))
-                it.parse()
-            }
 
             return ColumnModel(
                 declaration = declaration,
@@ -96,11 +92,15 @@ class KspProcessor(
                 columnName = columnName,
                 nameInDsl = name.takeUnless { idProps.size == 1 && idProps.first().first.getPropName() == name } ?: "id",
                 type = declaration.type.toTypeName(),
-                annotations = propAnnotations.toList(),
                 autoIncrementing = autoIncrement,
                 default = default,
                 foreignKey = foreignKey
-            )
+            ).also {
+                val uniqueIndexName = declaration.getAnnotation(Unique::class)?.getArgumentAs<String>()
+                if (uniqueIndexName != null) {
+                    uniqueAnnotations.getOrPut(uniqueIndexName) { mutableListOf() }.add(it)
+                }
+            }
         }
 
         val columns = (props - referenceProps - backReferenceProps).associateWith { declaration ->
@@ -146,6 +146,7 @@ class KspProcessor(
             columns = columns.values.toList(),
             annotations = annotations.toList(),
             primaryKey = primaryKey,
+            uniques = uniqueAnnotations,
             references = refColumns,
             backReferences = backRefColumns
         )

@@ -53,6 +53,14 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
             tableDef.addFunction(generateUpdateApplicator(tableModel, false))
             tableDef.addFunction(generatePKMaker(tableModel))
             tableDef.addTableSuperclass(tableModel)
+            if (tableModel.uniques.isNotEmpty()) {
+                tableDef.addInitializerBlock(CodeBlock.builder().apply {
+                    tableModel.uniques.forEach { indexName, columns ->
+                        val template = columns.joinToString(", ") { "%N" }
+                        addStatement("uniqueIndex(%S, $template)", indexName, *columns.map { it.nameInEntity }.toTypedArray())
+                    }
+                }.build())
+            }
 
             fileSpec
                 .addType(tableDef.build())
@@ -141,7 +149,7 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
                     }
                 }
             } else {
-                // Auto detect foreign keys.
+                // Auto-detect foreign keys.
                 remotePK.forEach { remoteIDColumn ->
                     val localName = remoteModel.originalClassName.simpleName.decapitate() + remoteIDColumn.nameInDsl.capitalize()
                     if (model.columns.find { it.foreignKey?.related == refInfo.related && it.nameInDsl == localName } == null) {
@@ -244,7 +252,7 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
         }
         backReferences.forEach { (column, refinfo) ->
             val relatedModel = models[refinfo.related]!!
-            val (remoteColumn, remoteReference) = relatedModel.references.entries.find { it.value.related == this.originalClassName }
+            val (_, remoteReference) = relatedModel.references.entries.find { it.value.related == this.originalClassName }
                 ?: throw ProcessorException("Could not find @Reference on ${relatedModel.originalClassName} that matches this @BackReference", column.declaration)
 
             val remoteColumns = getForeignKeysForReference(relatedModel, remoteReference)

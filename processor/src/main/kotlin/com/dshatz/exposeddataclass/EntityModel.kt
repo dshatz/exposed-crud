@@ -17,6 +17,7 @@ data class EntityModel(
     val columns: List<ColumnModel>,
     val annotations: List<AnnotationInfo>,
     val primaryKey: PrimaryKey,
+    val uniques: Map<String, List<ColumnModel>>,
     val references: Map<ColumnModel, ReferenceInfo.WithFK>,
     val backReferences: Map<ColumnModel, ReferenceInfo.Reverse>
 ) {
@@ -24,15 +25,11 @@ data class EntityModel(
     override fun toString(): String {
         return "[${declaration.simpleName.asString()}] (${columns.joinToString { 
             it.nameInDsl + (it.default?.let { " = " + it.toString() } ?: "")
-        }})"
+        }}) PK: $primaryKey; Unique: $uniques"
     }
 
     val tableClass by lazy {
         ClassName(originalClassName.packageName, originalClassName.simpleName + "Table")
-    }
-
-    val entityClass by lazy {
-        ClassName(originalClassName.packageName, originalClassName.simpleName + "Entity")
     }
 
     fun tableSuperclass(): Pair<TypeName, CodeBlock> {
@@ -44,34 +41,6 @@ data class EntityModel(
                 if (primaryKey.prop.type in tableTypes) {
                     tableTypes[primaryKey.prop.type]!! to CodeBlock.of("%S, %S", tableName, primaryKey.prop.nameInDsl)
                 } else IdTable::class.asTypeName().parameterizedBy(primaryKey.prop.type) to CodeBlock.of("%S", tableName)
-            }
-        }
-    }
-
-    fun entitySuperclass(): Pair<TypeName, CodeBlock> {
-        val codeBlock = CodeBlock.of("id")
-        return when (primaryKey) {
-            is PrimaryKey.Composite -> {
-                CompositeEntity::class.asTypeName() to codeBlock
-            }
-            is PrimaryKey.Simple -> {
-                if (primaryKey.prop.type in entityTypes) {
-                    entityTypes[primaryKey.prop.type]!! to codeBlock
-                } else Entity::class.asTypeName().parameterizedBy(primaryKey.prop.type) to codeBlock
-            }
-        }
-    }
-
-    fun entityCompanionObjectSuperclass(entityClass: ClassName, tableClass: ClassName): Pair<TypeName, CodeBlock> {
-        val codeBlock = CodeBlock.of("%T", tableClass)
-        return when (primaryKey) {
-            is PrimaryKey.Composite -> {
-                CompositeEntityClass::class.asTypeName().parameterizedBy(entityClass) to codeBlock
-            }
-            is PrimaryKey.Simple -> {
-                if (primaryKey.prop.type in entityCompanionTypes) {
-                    entityCompanionTypes[primaryKey.prop.type]!!.parameterizedBy(entityClass) to codeBlock
-                } else EntityClass::class.asTypeName().parameterizedBy(primaryKey.prop.type, entityClass) to codeBlock
             }
         }
     }
@@ -126,7 +95,6 @@ data class ColumnModel(
     val columnName: String,
     val nameInDsl: String,
     val type: TypeName,
-    val annotations: List<AnnotationInfo>,
     val autoIncrementing: Boolean,
     val default: CodeBlock?,
     val foreignKey: FKInfo?
