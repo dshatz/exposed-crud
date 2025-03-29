@@ -16,6 +16,8 @@ Based on your annotations this library will generate:
 [Sample usage (test class)](https://github.com/dshatz/exposed-crud/blob/main/sample/src/test/kotlin/com/dshatz/exposed_crud/TestDB.kt)
 
 ## Installation
+![](https://img.shields.io/maven-central/v/com.dshatz.exposed-crud/lib)
+
 ```kotlin
 plugins {
   id("com.google.devtools.ksp") version "2.1.20-1.0.31"
