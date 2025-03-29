@@ -24,8 +24,9 @@ plugins {
 }
 
 dependencies {
-  ksp("com.dshatz.exposed-crud:processor:1.0.0")
-  implementation("com.dshatz.exposed-crud:lib:1.0.0")
+  ksp("com.dshatz.exposed-crud:processor:1.0.1")
+  implementation("com.dshatz.exposed-crud:lib:1.0.1")
+  // also add exposed-core
 }
 ```
 
@@ -122,9 +123,133 @@ data class Movie(
 )
 ```
 
+#### Reverse relationships
+Now that you have annotated `Movie.director` with `@References(Director::class)`, we can optionally add a reverse relationship on `Director`.
+
+```kotlin
+@Entity
+data class Director(
+   @Id(autoGenerate = true) val id: Long,
+
+   @BackReference(Movie::class)
+   val movies: List<Movie>? = null
+)
+```
+
+
 ## Working with the CRUD repository
-The repository can be accessed using an extension property on the generated Exposed table DSL. 
-For example, `MovieTable.repo`.
+This is the whole purpose of this library. Simply perform CRUD operations using your existing data class instances.
+
+The generated `CrudRepository` is is immutable and stateless. It is also not bound to any Exposed transaction or DB instance.
+
+**Note: **When calling `CrudRepository` methods you should supply your own transaction with `transaction {}` block.
+
+**First, get the repository:**
+ - From the generated table class: `MovieTable.repo`.
+ - From the original data class: `Movie::class.repo`.
+
+### Find By Primary Key
+```kotlin
+val movie: Movie = repo.findById(1L)
+```
+
+### Select all
+```kotlin
+val allMovies: List<Movie> = repo.selectAll()
+// Or selectAllLazy (uses Exposed mapLazy under the hood).
+```
+
+### Normal select
+```kotlin
+val moviesFromDirector: Iterable<Movie> = repo.select().where(MovieTable.directorId eq 1)
+// Call .first(), .map() or any other iterable function.
+```
+
+### Select with related
+```kotlin
+val moviesWithDirectors: List<Movie> = repo.withRelated(DirectorTable).selectAll()
+// Now each `Movie` instance will have a non-null `director: Director` prop.
+```
+
+### Insert
+There are 2 ways to perform inserts.
+
+`repo.create()` will do an insert ignoring the values of auto-incrementing columns. This is useful when receiving a newly created object from the frontend where the ID is not known and is set to some arbitrary value like 0 or -1.
+
+`repo.insert()` will do an insert with all columns.
+
+If your Entity has no auto-incrementing columns, `insert()` and `create()` behave identically.
+
+```kotlin
+val movie = Movie(
+   id = -1,
+   title = "Die Hard",
+   originalTitle = null,
+   directorId = 1 
+)
+repo.create(movie) // Movie is inserted with an auto-generated id.
+repo.insert(movie) // Movie is inserted with an id = -1.
+```
+
+Additionally, `createReturning` and `insertReturning` can be used to get back what was inserted.
+```kotlin
+val insertedMovie: Movie = repo.createReturning(movie)
+```
+
+### Insert with related
+Same as for selects, you can create a variation of your repo that will include the related entities.
+
+```kotlin
+val movieWithDirectorRepo = repo.withRelated(DirectorTable)
+
+val movie = Movie(
+   id = -1,
+   title = "Die Hard",
+   originalTitle = null,
+   directorId = 1,
+   director = Director(name = "Alfred")
+)
+
+val inserted = movieWithDirectorRepo.createWithRelated(movie)
+```
+
+So what is happening here? Since we passed a non-null `director` value, this will happen:
+ 1. Director will be inserted using `create()`.
+ 2. `Movie.directorId` will be set to the ID of the inserted `Director`.
+ 3. Movie will be inserted.
+
+In this case, `directorId = 1` is ignored. If `director` is null, Movie will be inseted with `directorId = 1`.
+
+*Please note that the returned Movie will not have the Director set. Currently this is a limitation that will be addressed in the future. As a workaround, you can retrieve it yourself using:* `movieWithDirectorRepo.findById(inserted.id)`.
+
+### Update
+Updating an existing entity is straightforward:
+```kotlin
+repo.update(movie)
+```
+
+This will issue an `UPDATE` on all fields with a `WHERE` clause derived from the primary key.
+
+Of course you may still use raw Exposed way of updating if you need to do an `UPDATE` with a different `WHERE`.
+
+### Deleting
+```kotlin
+repo.delete(movie) 
+```
+
+Same as with `UPDATE`, this will delete based on the primary key.
+
+
+## Other things
+All generated tables will have a couple of helper functions that you can also call directly if needed.
+- `MovieTable.toEntity(resultRow: ResultRow): E`
+
+
+This is still in early stages so let me know what functionality essential to you is missing.
+Not everything will be possible to implement however. 
+
+
+
 
 
 
