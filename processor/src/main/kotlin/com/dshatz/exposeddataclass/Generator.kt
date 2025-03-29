@@ -68,6 +68,7 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
                     typedQueriesGenerator?.generateRepoAccessors(tableModel)?.forEach { addProperty(it) }
                 }
                 .addFunction(generateFindById(tableModel))
+                .addFunction(generateDeleteById(tableModel))
                 .apply {
                     if (tableModel.columns.any { it.foreignKey != null }) {
                         addFunction(generateInsertWithRelated(tableModel))
@@ -357,7 +358,19 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
     }
 
     private fun generateFindById(model: EntityModel): FunSpec {
-        val idCode = when (model.primaryKey) {
+        val idCode = makeIdCode(model)
+        return FunSpec.builder("findById")
+            .receiver(model.crudRepositoryType())
+            .returns(model.originalClassName.copy(nullable = true))
+            .addParameters(model.primaryKey.map {
+                ParameterSpec(it.nameInEntity, it.type)
+            })
+            .addCode("return findOne({%T.id.eq(EntityID(%L, %T))})", model.tableClass, idCode, model.tableClass)
+            .build()
+    }
+
+    private fun makeIdCode(model: EntityModel): CodeBlock {
+        return when (model.primaryKey) {
             is PrimaryKey.Composite -> {
                 CodeBlock.builder()
                     .beginControlFlow("%T", CompositeID::class)
@@ -375,13 +388,19 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
                     .build()
             }
         }
-        return FunSpec.builder("findById")
+    }
+
+    private fun generateDeleteById(model: EntityModel): FunSpec {
+        val idCode = makeIdCode(model)
+        val deleteWhere = MemberName("org.jetbrains.exposed.sql", "deleteWhere")
+        val eq = MemberName("org.jetbrains.exposed.sql.SqlExpressionBuilder", "eq")
+        return FunSpec.builder("deleteById")
             .receiver(model.crudRepositoryType())
-            .returns(model.originalClassName.copy(nullable = true))
+            .returns(INT)
             .addParameters(model.primaryKey.map {
                 ParameterSpec(it.nameInEntity, it.type)
             })
-            .addCode("return findOne({%T.id.eq(EntityID(%L, %T))})", model.tableClass, idCode, model.tableClass)
+            .addCode("return table.%M(op = {\n%T.id.%M(EntityID(%L, %T))\n})", deleteWhere, model.tableClass, eq, idCode, model.tableClass)
             .build()
     }
 

@@ -194,7 +194,7 @@ class TestDB {
     }
 
     @Test
-    fun `delete by primary key`() = transaction {
+    fun `delete entity`() = transaction {
         val repo = LanguageTable.repo
         val language = repo.createReturning(Language("lv"))
         assertEquals(language, repo.findById("lv"))
@@ -203,7 +203,7 @@ class TestDB {
     }
 
     @Test
-    fun `delete by composite primary key`() = transaction {
+    fun `delete entity with composite key`() = transaction {
         val repo = CategoryTranslationsTable.repo.withRelated(CategoryTable, LanguageTable)
 
         val created = repo.createWithRelated(CategoryTranslations(
@@ -216,6 +216,23 @@ class TestDB {
         assertNotNull(repo.findById(created.categoryId, created.languageCode))
         val deletedCount = repo.delete(created)
         assertEquals(1, deletedCount)
+        assertNull(repo.findById(created.categoryId, created.languageCode))
+    }
+
+    @Test
+    fun `delete by id`() = transaction {
+        val repo = CategoryTranslationsTable.repo.withRelated(CategoryTable).withRelated(LanguageTable)
+        val created = repo.createWithRelated(
+            CategoryTranslations(
+                -1,
+                "",
+                "Sveiki",
+                category = Category(),
+                language = Language("lv")
+            )
+        )
+        assertNotNull(repo.findById(created.categoryId, created.languageCode))
+        repo.deleteById(created.categoryId, created.languageCode)
         assertNull(repo.findById(created.categoryId, created.languageCode))
     }
 
