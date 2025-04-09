@@ -9,7 +9,6 @@ You define a Kotlin `data class` holding your data and use annotations to mark P
 Based on your annotations this library will generate:
  - Exposed table DSL.
  - A `CrudRepository` class with strongly-typed CRUD methods based on your data class.
- - An additional data class ending with `_Data` that contains all properties except the auto-incrementing ones.
 
 [Sample data classes](https://github.com/dshatz/exposed-crud/tree/main/sample/src/main/kotlin/com/dshatz/exposed_crud/models)
 
