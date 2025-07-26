@@ -19,12 +19,12 @@ Based on your annotations this library will generate:
 
 ```kotlin
 plugins {
-  id("com.google.devtools.ksp") version "2.1.20-1.0.31"
+  id("com.google.devtools.ksp") version "..."
 }
 
 dependencies {
-  ksp("com.dshatz.exposed-crud:processor:1.0.1")
-  implementation("com.dshatz.exposed-crud:lib:1.0.1")
+  ksp("com.dshatz.exposed-crud:processor:1.0.3")
+  implementation("com.dshatz.exposed-crud:lib:1.0.3")
   // also add exposed-core
 }
 ```
@@ -44,6 +44,10 @@ data class Movie(
     val categoryId: Long,
 )
 ```
+
+You can use `@Varchar`, `@Text`, `@MediumText`, `@LargeText` to specify what type of column to use for your String property. If none are applied, simple exposed `text` will be used.
+
+`@Collate` annotation is also available.
 
 ### 2. Specify the primary key with @Id
 Set optional parameter `autoGenerate = true` to mark this column as auto-incrementing. Default `false`.
