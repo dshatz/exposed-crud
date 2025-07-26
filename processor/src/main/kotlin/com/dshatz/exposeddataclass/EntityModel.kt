@@ -5,8 +5,6 @@ import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.symbol.KSPropertyDeclaration
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
-import org.jetbrains.exposed.dao.*
-import org.jetbrains.exposed.dao.Entity
 import org.jetbrains.exposed.dao.id.*
 import java.util.*
 
@@ -97,10 +95,48 @@ data class ColumnModel(
     val type: TypeName,
     val autoIncrementing: Boolean,
     val default: CodeBlock?,
-    val foreignKey: FKInfo?
+    val foreignKey: FKInfo?,
+    val attrs: List<FieldAttrs>
 ) {
     override fun toString(): String {
         return "$nameInDsl: $type"
+    }
+}
+
+sealed class FieldAttrs {
+
+    data class Collate(val collate: String? = null): FieldAttrs()
+    sealed class ColType: FieldAttrs() {
+        abstract val exposedFunction: kotlin.String
+        sealed class String(): ColType() {
+            data class Varchar(val length: Int): String() {
+                override val exposedFunction: kotlin.String = "varchar"
+            }
+
+            sealed class Text: String() {
+                abstract val eager: Boolean
+                data class GenericText(override val eager: Boolean): Text() {
+                    override val exposedFunction: kotlin.String = "text"
+                }
+                data class MediumText(override val eager: Boolean): Text() {
+                    override val exposedFunction: kotlin.String = "mediumText"
+                }
+                data class LargeText(override val eager: Boolean): Text() {
+                    override val exposedFunction: kotlin.String = "largeText"
+                }
+            }
+        }
+
+        sealed class Json: ColType() {
+
+            abstract val formatName: kotlin.String
+            data class Json(override val formatName: kotlin.String): ColType.Json() {
+                override val exposedFunction: kotlin.String = "json"
+            }
+            data class Jsonb(override val formatName: kotlin.String): ColType.Json() {
+                override val exposedFunction: kotlin.String = "jsonb"
+            }
+        }
     }
 }
 

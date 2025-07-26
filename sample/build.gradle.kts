@@ -12,6 +12,8 @@ dependencies {
     implementation(libs.exposed.core)
     implementation(libs.exposed.jdbc)
     implementation(libs.exposed.dao)
+    implementation(libs.exposed.kotlin.datetime)
+    implementation(libs.exposed.json)
     implementation(libs.serial)
     implementation(project(":annotations"))
     ksp(project(":processor"))

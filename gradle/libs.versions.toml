@@ -1,7 +1,7 @@
 [versions]
-kotlin = "2.1.20"
+kotlin = "2.1.21"
 exposed = "0.60.0"
-ksp = "2.1.20-1.0.31"
+ksp = "2.1.21-2.0.1"
 
 
 [plugins]
@@ -12,10 +12,13 @@ serial = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotl
 
 [libraries]
 ksp-api = { module = "com.google.devtools.ksp:symbol-processing-api", version.ref = "ksp" }
-kotlinpoet = { module = "com.squareup:kotlinpoet", version = "1.14.1" }
-kotlinpoet-interop = { module = "com.squareup:kotlinpoet-ksp", version = "1.14.1" }
+kotlinpoet = { module = "com.squareup:kotlinpoet", version = "2.2.0" }
+kotlinpoet-interop = { module = "com.squareup:kotlinpoet-ksp", version = "2.2.0" }
 exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
 exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposed" }
 exposed-dao = { module = "org.jetbrains.exposed:exposed-dao", version.ref = "exposed" }
+exposed-kotlin-datetime = { module = "org.jetbrains.exposed:exposed-kotlin-datetime", version.ref = "exposed" }
+exposed-json = { module = "org.jetbrains.exposed:exposed-json", version.ref = "exposed" }
+datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version = "0.6.2" }
 
 serial = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.6.1" }

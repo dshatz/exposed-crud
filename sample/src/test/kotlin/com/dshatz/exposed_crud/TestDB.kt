@@ -1,6 +1,7 @@
 package com.dshatz.exposed_crud
 
 import com.dshatz.exposed_crud.models.*
+import kotlinx.datetime.Clock
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -25,7 +26,8 @@ class TestDB {
 
     @Test
     fun `test insert`() = transaction {
-        val inserted = DirectorTable.repo.createReturning(Director(0, "Alfred"))
+        val director = Director(0, "Alfred")
+        val inserted = DirectorTable.repo.createReturning(director.copy(oldDirector = director))
         val found = DirectorTable.repo.select().where(DirectorTable.name eq "Alfred").first()
         assertEquals("Alfred", found.name)
         assertEquals(inserted, found)
@@ -116,7 +118,7 @@ class TestDB {
                 ),
             )
         )
-        MovieTable.repo.create(Movie(id = -1, "The Birds", "01-01-1963", null, directorId, categoryId))
+        MovieTable.repo.create(Movie(id = -1, "The Birds", Clock.System.now(), null, directorId, categoryId))
 
         val movieWithDirector = MovieTable.repo.withRelated(DirectorTable).selectAll().first()
         assertEquals("Alfred", movieWithDirector.director?.name)
@@ -131,6 +133,7 @@ class TestDB {
                 directorId = -1,
                 categoryId = -1,
                 director = Director(name = "John McTiernan"),
+                createdAt = Clock.System.now(),
                 category = Category()
             )
         )
@@ -171,26 +174,26 @@ class TestDB {
             )
         val withTranslations = CategoryTable.repo.withRelated(CategoryTranslationsTable).findById(category.id)
         assertNotNull(withTranslations?.translations)
-        assertEquals(2, withTranslations?.translations?.size)
-        assertEquals("Latviski", withTranslations?.translations?.find { it.languageCode == "lv" }?.translation)
-        assertEquals("In english", withTranslations?.translations?.find { it.languageCode == "en" }?.translation)
+        assertEquals(2, withTranslations.translations.size)
+        assertEquals("Latviski", withTranslations.translations.find { it.languageCode == "lv" }?.translation)
+        assertEquals("In english", withTranslations.translations.find { it.languageCode == "en" }?.translation)
 
         val director = DirectorTable.repo.createReturning(Director(name = "Alfred"))
         val movie1 = MovieTable.repo.createReturning(
-            Movie(title = "The birds", directorId = director.id, categoryId = category.id),
+            Movie(title = "The birds", directorId = director.id, categoryId = category.id, createdAt = Clock.System.now()),
         )
 
         val movie2 = MovieTable.repo.createReturning(
-            Movie(title = "The birds 2", directorId = director.id, categoryId = category.id),
+            Movie(title = "The birds 2", directorId = director.id, categoryId = category.id, createdAt = Clock.System.now()),
         )
 
         val directorWithMovies = DirectorTable.repo.withRelated(MovieTable).findById(director.id)
         assertNotNull(directorWithMovies?.movies)
-        assertEquals(setOf(movie1, movie2), directorWithMovies?.movies?.toSet())
+        assertEquals(setOf(movie1, movie2), directorWithMovies.movies.toSet())
 
         val categoryWithMovies = CategoryTable.repo.withRelated(MovieTable).findById(category.id)
         assertNotNull(categoryWithMovies?.movies)
-        assertEquals(setOf(movie1, movie2), categoryWithMovies?.movies?.toSet())
+        assertEquals(setOf(movie1, movie2), categoryWithMovies.movies.toSet())
     }
 
     @Test

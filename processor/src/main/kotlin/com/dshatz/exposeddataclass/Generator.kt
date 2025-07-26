@@ -3,6 +3,7 @@ package com.dshatz.exposeddataclass
 import com.dshatz.exposed_crud.typed.IEntityTable
 import com.dshatz.exposeddataclass.EntityModel.Companion.crudRepositoryType
 import com.google.devtools.ksp.processing.KSPLogger
+import com.google.devtools.ksp.symbol.KSFunctionDeclaration
 import com.squareup.kotlinpoet.*
 import com.squareup.kotlinpoet.ParameterizedTypeName.Companion.parameterizedBy
 import org.jetbrains.exposed.dao.id.CompositeID
@@ -12,13 +13,18 @@ import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.statements.UpdateBuilder
 
-class Generator(private val models: Map<ClassName, EntityModel>, private val logger: KSPLogger) {
+class Generator(
+    private val models: Map<ClassName, EntityModel>,
+    private val jsonFormats: JsonFormatModel,
+    private val logger: KSPLogger
+) {
 
     private val newModelMapping: MutableMap<EntityModel, ClassName> = mutableMapOf()
     private val typedQueriesGenerator: TypedQueriesGenerator? = TypedQueriesGenerator(newModelMapping)
 
     private val finalColumnTypes: MutableMap<Pair<EntityModel, ColumnModel>, TypeName> = mutableMapOf()
 
+    private var jsonFormatAccessors: MutableMap<String, MemberName> = mutableMapOf()
     fun generate(): Map<EntityModel, FileSpec> {
         // https://www.jetbrains.com/help/exposed/getting-started-with-exposed.html#define-table-object
         models.values.forEach { calculateColumnTypes(it) }
@@ -75,6 +81,21 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
                     }
                 }
                 .build()
+        }
+    }
+
+    fun generateJsonFormatAccessors(): Map<String, Pair<KSFunctionDeclaration, FileSpec>> {
+        return jsonFormats.formats.mapValues { (name, declaration) ->
+            val fileSpec = FileSpec.builder(declaration.packageName.asString(), declaration.simpleName.asString() + "JsonFormats")
+            val accessorSpec = PropertySpec.builder(name + "jsonFormat", ClassName("kotlinx.serialization.json", "Json"))
+                .delegate(CodeBlock.builder()
+                    .beginControlFlow("lazy")
+                    .addStatement("${declaration.qualifiedName?.asString()}()")
+                    .endControlFlow()
+                    .build()
+                ).build()
+            jsonFormatAccessors[name] = MemberName(declaration.packageName.asString(), name + "jsonFormat")
+            declaration to fileSpec.addProperty(accessorSpec).build()
         }
     }
 
@@ -206,14 +227,11 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
      */
     private fun getForeignKeysForReference(tableModel: EntityModel, referenceInfo: ReferenceInfo.WithFK): Collection<ColumnModel> {
         val specifiedColumns = referenceInfo.localIdProps.takeUnless { it.isEmpty() }?.toList()
-        logger.warn("Reference ${tableModel.originalClassName.simpleName} -> ${referenceInfo.related}. Specified columns = $specifiedColumns")
         return if (specifiedColumns == null) {
             // Find matching foreign keys
             val fkColumns = tableModel.columns.filter {
                 it.foreignKey?.related == referenceInfo.related
             }.associateBy { it.nameInDsl }
-
-            logger.warn("fkColumns = $fkColumns")
 
             val relatedModel = models[referenceInfo.related]!!
             relatedModel.primaryKey.forEach {
@@ -319,7 +337,8 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
 
         } else {
             // Not a FK
-            initializer.add("%L(%S)", exposedTypeFun(), columnName)
+            val typeFun = exposedTypeFun(columnName)
+            initializer.add(typeFun)
             if (autoIncrementing) initializer.add(".autoIncrement()")
             default?.let { initializer.add(".default(%L)", it) }
             if (type.isNullable) initializer.add(".nullable()")
@@ -344,16 +363,93 @@ class Generator(private val models: Map<ClassName, EntityModel>, private val log
         return spec.initializer(initializer.build()).build()
     }
 
-    private fun ColumnModel.exposedTypeFun(): String {
-        return when (this.type.copy(nullable = false)) {
-            Int::class.asTypeName() -> "integer"
-            Long::class.asTypeName() -> "long"
-            String::class.asTypeName() -> "text"
-            Boolean::class.asTypeName() -> "bool"
-            Float::class.asTypeName() -> "float"
-            Short::class.asTypeName() -> "short"
-            Char::class.asTypeName() -> "char"
-            else -> throw ProcessorException("Unsupported type ${this.type}", this.declaration)
+    private fun ColumnModel.exposedTypeFun(colName: String): CodeBlock {
+        val kotlinDateTimePackage = "org.jetbrains.exposed.sql.kotlin.datetime"
+        fun makeBuiltinCode(name: String): CodeBlock {
+            return CodeBlock.of("%N(%S)", MemberName(Table::class.asClassName(), name), colName)
+        }
+        fun makeKotlinDatetimeCode(name: String): CodeBlock {
+            return CodeBlock.of(
+                "%M(%S)",
+                MemberName("org.jetbrains.exposed.sql.kotlin.datetime", name, isExtension = true),
+                colName
+            )
+        }
+        fun makeTextCode(type: FieldAttrs.ColType.String.Text, collate: String?): CodeBlock {
+            return CodeBlock.of(
+                "%N(%S, %L, %L)",
+                MemberName(Table::class.asClassName(), type.exposedFunction), // text, mediumText, largeText
+                colName,
+                collate?.let { "\"$it\"" }.toString(), // Quoted collate value or unquoted null,
+                type.eager
+            )
+        }
+        fun makeVarcharCode(length: Int, collate: String?): CodeBlock {
+            return CodeBlock.of(
+                "varchar(%S, %L, %L)",
+                colName,
+                length,
+                collate?.let { "\"$it\"" }.toString(), // Quoted collate value or unquoted null,
+            )
+        }
+
+        fun makeJsonCode(typeAttr: FieldAttrs.ColType.Json, propType: TypeName): CodeBlock {
+            return CodeBlock.of(
+                "%M<%T>(%S, %M)",
+                MemberName("org.jetbrains.exposed.sql.json", typeAttr.exposedFunction, isExtension = true),
+                propType.copy(nullable = false),
+                colName,
+                jsonFormatAccessors[typeAttr.formatName] ?: throw ProcessorException("Could not find json format with name ${typeAttr.formatName}. Please define it with @JsonFormat.", declaration)
+            )
+        }
+        val nonNullType = type.copy(nullable = false)
+
+        val colTypeAttrs = attrs.filterIsInstance<FieldAttrs.ColType>()
+
+        return when (nonNullType) {
+            BYTE -> makeBuiltinCode("byte")
+            SHORT -> makeBuiltinCode("short")
+            INT -> makeBuiltinCode("integer")
+            LONG -> makeBuiltinCode("long")
+
+            U_BYTE -> makeBuiltinCode("ubyte")
+            U_SHORT -> makeBuiltinCode("ushort")
+            U_INT -> makeBuiltinCode("uint")
+            U_LONG -> makeBuiltinCode("ulong")
+
+            CHAR -> makeBuiltinCode("char")
+            STRING -> {
+                val collate = attrs.filterIsInstance<FieldAttrs.Collate>().firstOrNull()?.collate
+                val type = colTypeAttrs.filterIsInstance<FieldAttrs.ColType.String>().firstOrNull()
+                    ?: FieldAttrs.ColType.String.Text.GenericText(false)
+                when (type) {
+                    is FieldAttrs.ColType.String.Text -> makeTextCode(type, collate)
+                    is FieldAttrs.ColType.String.Varchar -> makeVarcharCode(type.length, collate)
+                }
+            }
+            BOOLEAN -> makeBuiltinCode("bool")
+            FLOAT -> makeBuiltinCode("float")
+            DOUBLE -> makeBuiltinCode("double")
+            BYTE_ARRAY -> makeBuiltinCode("binary")
+            LIST -> makeBuiltinCode("array")
+            else -> {
+                when ((nonNullType as? ClassName)?.canonicalName) {
+                    "kotlinx.datetime.LocalDate" -> makeKotlinDatetimeCode("date")
+                    "kotlinx.datetime.LocalDateTime" -> makeKotlinDatetimeCode("datetime")
+                    "kotlinx.datetime.Instant" -> makeKotlinDatetimeCode("timestamp")
+                    "java.math.BigDecimal" -> makeBuiltinCode("decimal")
+                    "java.util.UUID" -> makeBuiltinCode("uuid")
+                    else -> {
+                        // Some other type. Check for json attrs.
+                        val jsonAttr = colTypeAttrs.filterIsInstance<FieldAttrs.ColType.Json>().firstOrNull()
+                        if (jsonAttr != null) {
+                            makeJsonCode(jsonAttr, type)
+                        } else {
+                            throw ProcessorException("Unsupported primitive ${this.type}. Please file a bug.", this.declaration)
+                        }
+                    }
+                }
+            }
         }
     }
 
